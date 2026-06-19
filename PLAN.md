@@ -4,7 +4,7 @@ A simple, fast, local folder cataloguer for a photographers' archive: assign tag
 folders, search by include/exclude tags, browse Explorer-style with thumbnails, and set
 folder covers from inside the app. Windows 10 & 11, fully Unicode (Cyrillic + Latin).
 
-**Status:** M1 (headless core) and M2 (WPF browser shell) complete; M3 (tagging + search UI) next.
+**Status:** M1–M3 complete (headless core, browser shell, tagging + search UI); M4 (folder covers) next.
 **Decisions locked:** 2026-06-19.
 
 ---
@@ -138,7 +138,7 @@ filtered by a normalized substring of the folder name. Example: `has {док} AN
       scan/reconcile, tag normalization, query engine.
 - [x] **M2 — Browse & thumbnails:** virtualized grid, Explorer thumbnails, navigation with
       preserved scroll, breadcrumb.
-- [ ] **M3 — Tagging & search:** tag panel (type-to-filter, include/exclude), search engine,
+- [x] **M3 — Tagging & search:** tag panel (type-to-filter, include/exclude), search engine,
       assign/remove, tag management (rename/merge/delete propagated to sidecars).
 - [ ] **M4 — Covers:** set from inside-folder photo or external image; `.ico` + `desktop.ini`
       automation + refresh.

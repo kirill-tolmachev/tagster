@@ -37,9 +37,53 @@ public partial class MainWindow : Window
 
     private async void OnOpenFolderClick(object sender, RoutedEventArgs e)
     {
-        var dialog = new OpenFolderDialog { Title = "Select a folder to browse" };
+        var dialog = new OpenFolderDialog { Title = "Select the archive folder" };
         if (dialog.ShowDialog(this) == true)
-            await _viewModel.NavigateToAsync(dialog.FolderName);
+            await _viewModel.OpenRootAsync(dialog.FolderName);
+    }
+
+    private async void OnTagClick(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: TagFilterViewModel tag })
+        {
+            e.Handled = true;
+            await _viewModel.ToggleTagAsync(tag, Keyboard.Modifiers.HasFlag(ModifierKeys.Alt));
+        }
+    }
+
+    private async void OnRenameTag(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: TagFilterViewModel tag })
+        {
+            var newName = PromptForText(this, "Rename tag",
+                "New name (renaming into an existing tag merges them):", tag.Name);
+            if (!string.IsNullOrWhiteSpace(newName) && newName.Trim() != tag.Name)
+                await _viewModel.RenameTagAsync(tag, newName.Trim());
+        }
+    }
+
+    private async void OnDeleteTag(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: TagFilterViewModel tag })
+        {
+            var confirm = MessageBox.Show(this,
+                $"Remove the tag “{tag.Name}” from all {tag.Count} folder(s)?",
+                "Delete tag", MessageBoxButton.OKCancel, MessageBoxImage.Warning);
+            if (confirm == MessageBoxResult.OK)
+                await _viewModel.DeleteTagAsync(tag);
+        }
+    }
+
+    private async void OnRemoveTagChip(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: string tag })
+            await _viewModel.RemoveTagAsync(tag);
+    }
+
+    private void OnNewTagKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter && _viewModel.AddTagCommand.CanExecute(null))
+            _viewModel.AddTagCommand.Execute(null);
     }
 
     private void OnRestoreScroll(double offset)
@@ -58,5 +102,47 @@ public partial class MainWindow : Window
                 return found;
         }
         return null;
+    }
+
+    /// <summary>A tiny modal text-input dialog, built in code to avoid an extra XAML window.</summary>
+    private static string? PromptForText(Window owner, string title, string prompt, string initial)
+    {
+        var label = new TextBlock { Text = prompt, Margin = new Thickness(12, 12, 12, 4), TextWrapping = TextWrapping.Wrap };
+        var box = new TextBox { Text = initial, Margin = new Thickness(12, 0, 12, 12), MinWidth = 280 };
+
+        var ok = new Button { Content = "OK", IsDefault = true, Width = 76 };
+        var cancel = new Button { Content = "Cancel", IsCancel = true, Width = 76, Margin = new Thickness(8, 0, 0, 0) };
+        var buttons = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Margin = new Thickness(12, 0, 12, 12),
+        };
+        buttons.Children.Add(ok);
+        buttons.Children.Add(cancel);
+
+        var layout = new DockPanel();
+        DockPanel.SetDock(label, Dock.Top);
+        DockPanel.SetDock(buttons, Dock.Bottom);
+        layout.Children.Add(label);
+        layout.Children.Add(buttons);
+        layout.Children.Add(box);
+
+        var dialog = new Window
+        {
+            Title = title,
+            Content = layout,
+            Width = 340,
+            SizeToContent = SizeToContent.Height,
+            ResizeMode = ResizeMode.NoResize,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Owner = owner,
+        };
+
+        string? result = null;
+        ok.Click += (_, _) => { result = box.Text; dialog.DialogResult = true; };
+        box.Loaded += (_, _) => { box.Focus(); box.SelectAll(); };
+
+        return dialog.ShowDialog() == true ? result : null;
     }
 }

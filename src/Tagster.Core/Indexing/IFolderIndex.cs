@@ -18,9 +18,9 @@ public interface IFolderIndex
     /// <summary>All indexed folders under a given archive root.</summary>
     Task<IReadOnlyList<TaggedFolder>> GetAllAsync(string rootPath, CancellationToken cancellationToken = default);
 
-    /// <summary>Folders matching the include/exclude/name query.</summary>
-    Task<IReadOnlyList<TaggedFolder>> SearchAsync(SearchQuery query, CancellationToken cancellationToken = default);
+    /// <summary>Folders matching the include/exclude/name query, optionally limited to one root.</summary>
+    Task<IReadOnlyList<TaggedFolder>> SearchAsync(SearchQuery query, string? rootPath = null, CancellationToken cancellationToken = default);
 
-    /// <summary>Every tag with the number of folders carrying it.</summary>
-    Task<IReadOnlyList<TagCount>> GetTagCountsAsync(CancellationToken cancellationToken = default);
+    /// <summary>Every tag with the number of folders carrying it, optionally limited to one root.</summary>
+    Task<IReadOnlyList<TagCount>> GetTagCountsAsync(string? rootPath = null, CancellationToken cancellationToken = default);
 }

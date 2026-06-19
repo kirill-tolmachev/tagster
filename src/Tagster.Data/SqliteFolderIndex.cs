@@ -110,7 +110,7 @@ public sealed class SqliteFolderIndex : IFolderIndex, IDisposable
             new { Root = rootPath }, cancellationToken);
     }
 
-    public async Task<IReadOnlyList<TaggedFolder>> SearchAsync(SearchQuery query, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<TaggedFolder>> SearchAsync(SearchQuery query, string? rootPath = null, CancellationToken cancellationToken = default)
     {
         var include = query.Include.Select(TagNormalizer.Normalize).Where(n => n.Length > 0).Distinct().ToList();
         var exclude = query.Exclude.Select(TagNormalizer.Normalize).Where(n => n.Length > 0).Distinct().ToList();
@@ -154,18 +154,43 @@ public sealed class SqliteFolderIndex : IFolderIndex, IDisposable
             sql += " AND name_norm LIKE @Name ESCAPE '\\'";
         }
 
+        if (rootPath is not null)
+        {
+            parameters.Add("Root", rootPath);
+            sql += " AND root_path = @Root";
+        }
+
         await using var connection = Open();
         return await QueryFoldersAsync(connection, sql + ";", parameters, cancellationToken);
     }
 
-    public async Task<IReadOnlyList<TagCount>> GetTagCountsAsync(CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<TagCount>> GetTagCountsAsync(string? rootPath = null, CancellationToken cancellationToken = default)
     {
+        string sql;
+        object? parameters = null;
+        if (rootPath is null)
+        {
+            sql =
+                """
+                SELECT MIN(tag) AS Name, COUNT(DISTINCT folder_id) AS Count
+                FROM folder_tags GROUP BY tag_norm ORDER BY Count DESC, Name ASC;
+                """;
+        }
+        else
+        {
+            sql =
+                """
+                SELECT MIN(ft.tag) AS Name, COUNT(DISTINCT ft.folder_id) AS Count
+                FROM folder_tags ft JOIN folders f ON f.id = ft.folder_id
+                WHERE f.root_path = @Root
+                GROUP BY ft.tag_norm ORDER BY Count DESC, Name ASC;
+                """;
+            parameters = new { Root = rootPath };
+        }
+
         await using var connection = Open();
-        var rows = await connection.QueryAsync<TagCountRow>(new CommandDefinition(
-            """
-            SELECT MIN(tag) AS Name, COUNT(DISTINCT folder_id) AS Count
-            FROM folder_tags GROUP BY tag_norm ORDER BY Count DESC, Name ASC;
-            """, cancellationToken: cancellationToken));
+        var rows = await connection.QueryAsync<TagCountRow>(
+            new CommandDefinition(sql, parameters, cancellationToken: cancellationToken));
         return rows.Select(r => new TagCount(r.Name, r.Count)).ToList();
     }
 

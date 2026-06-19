@@ -13,6 +13,7 @@ public static class CoreServiceCollectionExtensions
         services.TryAddSingleton<IFolderBrowser, FolderBrowser>();
         services.TryAddSingleton<TaggingService>();
         services.TryAddSingleton<ArchiveScanner>();
+        services.TryAddSingleton<ITagManager, TagManager>();
         return services;
     }
 }

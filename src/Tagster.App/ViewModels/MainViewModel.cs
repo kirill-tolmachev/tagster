@@ -7,7 +7,10 @@ using Tagster.Shell;
 
 namespace Tagster.App;
 
-/// <summary>Drives the browser window: folder listing, navigation, and async thumbnail loading.</summary>
+/// <summary>
+/// Drives the main window: folder browsing, tag-based search, per-folder tag editing, and tag
+/// management — all over the same archive root.
+/// </summary>
 public sealed partial class MainViewModel : ObservableObject
 {
     private const int ThumbnailSize = 128;
@@ -15,28 +18,51 @@ public sealed partial class MainViewModel : ObservableObject
 
     private readonly IFolderBrowser _browser;
     private readonly IThumbnailService _thumbnails;
+    private readonly IFolderIndex _index;
+    private readonly TaggingService _tagging;
+    private readonly ArchiveScanner _scanner;
+    private readonly ITagManager _tagManager;
     private readonly NavigationHistory _history = new();
     private readonly SynchronizationContext _uiContext;
 
     private CancellationTokenSource? _thumbnailCts;
 
-    public MainViewModel(IFolderBrowser browser, IThumbnailService thumbnails)
+    public MainViewModel(
+        IFolderBrowser browser,
+        IThumbnailService thumbnails,
+        IFolderIndex index,
+        TaggingService tagging,
+        ArchiveScanner scanner,
+        ITagManager tagManager)
     {
         _browser = browser;
         _thumbnails = thumbnails;
+        _index = index;
+        _tagging = tagging;
+        _scanner = scanner;
+        _tagManager = tagManager;
         _uiContext = SynchronizationContext.Current ?? new SynchronizationContext();
     }
 
     public ObservableCollection<FolderItemViewModel> Items { get; } = [];
     public ObservableCollection<BreadcrumbSegment> Breadcrumbs { get; } = [];
+    public ObservableCollection<TagFilterViewModel> Tags { get; } = [];
+    public ObservableCollection<TagFilterViewModel> VisibleTags { get; } = [];
 
     [ObservableProperty] private string _currentPath = "";
+    [ObservableProperty] private string? _rootPath;
     [ObservableProperty] private bool _isLoading;
+    [ObservableProperty] private bool _isSearchMode;
     [ObservableProperty] private string? _statusText;
+    [ObservableProperty] private string _tagFilterText = "";
+    [ObservableProperty] private string _newTagText = "";
+    [ObservableProperty] private FolderItemViewModel? _selectedItem;
 
     public bool CanGoBack => _history.CanGoBack;
     public bool CanGoForward => _history.CanGoForward;
     public bool CanGoUp => !string.IsNullOrEmpty(CurrentPath) && Directory.GetParent(CurrentPath) is not null;
+    public bool HasRoot => RootPath is not null;
+    public bool HasSelection => SelectedItem is not null;
 
     /// <summary>Set by the view: reads the grid's current vertical scroll offset.</summary>
     public Func<double>? ScrollOffsetProvider { get; set; }
@@ -44,16 +70,28 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>Raised after a load completes when a saved scroll offset should be restored.</summary>
     public event Action<double>? RestoreScrollRequested;
 
-    /// <summary>Open the initial location (the user's profile folder).</summary>
     public Task InitializeAsync()
         => NavigateToAsync(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+
+    // ---- navigation ----
 
     public async Task NavigateToAsync(string path)
     {
         if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path)) return;
         SaveCurrentScroll();
+        ResetFilterStates();
+        IsSearchMode = false;
         _history.Navigate(Path.GetFullPath(path));
         await LoadCurrentAsync(restoreScroll: false);
+    }
+
+    /// <summary>Pick a folder as the archive root, browse it, and scan it for tags.</summary>
+    public async Task OpenRootAsync(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path)) return;
+        RootPath = Path.GetFullPath(path);
+        await NavigateToAsync(path);
+        await RescanAndRefreshTagsAsync();
     }
 
     [RelayCommand]
@@ -83,11 +121,155 @@ public sealed partial class MainViewModel : ObservableObject
             await NavigateToAsync(parent.FullName);
     }
 
-    private void SaveCurrentScroll()
+    // ---- tag filtering / search ----
+
+    partial void OnTagFilterTextChanged(string value) => RefreshVisibleTags();
+
+    private void RefreshVisibleTags()
     {
-        if (ScrollOffsetProvider is not null)
-            _history.SaveScrollOffset(ScrollOffsetProvider());
+        var query = TagNormalizer.Normalize(TagFilterText);
+        VisibleTags.Clear();
+        foreach (var tag in Tags)
+            if (query.Length == 0 || TagNormalizer.Normalize(tag.Name).Contains(query, StringComparison.Ordinal))
+                VisibleTags.Add(tag);
     }
+
+    public async Task ToggleTagAsync(TagFilterViewModel tag, bool exclude)
+    {
+        tag.State = exclude
+            ? (tag.State == TagFilterState.Exclude ? TagFilterState.None : TagFilterState.Exclude)
+            : (tag.State == TagFilterState.Include ? TagFilterState.None : TagFilterState.Include);
+        await ApplyFiltersAsync();
+    }
+
+    [RelayCommand]
+    private async Task ClearFilters()
+    {
+        ResetFilterStates();
+        IsSearchMode = false;
+        await LoadCurrentAsync(restoreScroll: false);
+    }
+
+    private void ResetFilterStates()
+    {
+        foreach (var tag in Tags)
+            tag.State = TagFilterState.None;
+    }
+
+    private async Task ApplyFiltersAsync()
+    {
+        var include = Tags.Where(t => t.State == TagFilterState.Include).Select(t => t.Name).ToList();
+        var exclude = Tags.Where(t => t.State == TagFilterState.Exclude).Select(t => t.Name).ToList();
+
+        if (include.Count == 0 && exclude.Count == 0)
+        {
+            IsSearchMode = false;
+            await LoadCurrentAsync(restoreScroll: false);
+            return;
+        }
+
+        IsSearchMode = true;
+        var query = new SearchQuery { Include = include, Exclude = exclude, IncludeMatch = TagMatch.All };
+        var results = await _index.SearchAsync(query, RootPath);
+        ReplaceItems(results
+            .OrderBy(r => r.Name, StringComparer.CurrentCultureIgnoreCase)
+            .Select(r => new FolderItemViewModel(r.Name, r.AbsolutePath, r.Tags)));
+        StatusText = $"{Items.Count} result{(Items.Count == 1 ? "" : "s")} · {include.Count} include / {exclude.Count} exclude";
+    }
+
+    // ---- tag editing on the selected folder ----
+
+    [RelayCommand(CanExecute = nameof(HasSelection))]
+    private async Task AddTag()
+    {
+        if (SelectedItem is null) return;
+        var tag = NewTagText.Trim();
+        if (tag.Length == 0) return;
+
+        var root = ResolveRoot(SelectedItem.FullPath);
+        await _tagging.AddTagsAsync(root, SelectedItem.FullPath, [tag]);
+        NewTagText = "";
+        SelectedItem.Tags = _tagging.GetTags(SelectedItem.FullPath);
+        await AfterTagEditAsync();
+    }
+
+    public async Task RemoveTagAsync(string tag)
+    {
+        if (SelectedItem is null) return;
+        var root = ResolveRoot(SelectedItem.FullPath);
+        await _tagging.RemoveTagsAsync(root, SelectedItem.FullPath, [tag]);
+        SelectedItem.Tags = _tagging.GetTags(SelectedItem.FullPath);
+        await AfterTagEditAsync();
+    }
+
+    private async Task AfterTagEditAsync()
+    {
+        await RefreshTagsAsync();
+        if (IsSearchMode) await ApplyFiltersAsync();
+    }
+
+    private string ResolveRoot(string folderPath)
+        => RootPath is not null && PathUtil.IsUnderRoot(RootPath, folderPath)
+            ? RootPath
+            : Directory.GetParent(folderPath)?.FullName ?? folderPath;
+
+    // ---- tag management (rename / delete) ----
+
+    public async Task RenameTagAsync(TagFilterViewModel tag, string newName)
+    {
+        await _tagManager.RenameAsync(RootPath ?? CurrentPath, tag.Name, newName);
+        await RefreshTagsAsync();
+        await RefreshViewAsync();
+    }
+
+    public async Task DeleteTagAsync(TagFilterViewModel tag)
+    {
+        await _tagManager.DeleteAsync(RootPath ?? CurrentPath, tag.Name);
+        await RefreshTagsAsync();
+        await RefreshViewAsync();
+    }
+
+    private Task RefreshViewAsync()
+        => IsSearchMode ? ApplyFiltersAsync() : LoadCurrentAsync(restoreScroll: false);
+
+    // ---- scanning / tag list ----
+
+    [RelayCommand(CanExecute = nameof(HasRoot))]
+    private Task Rescan() => RescanAndRefreshTagsAsync();
+
+    public async Task RescanAndRefreshTagsAsync()
+    {
+        if (RootPath is null) return;
+        IsLoading = true;
+        StatusText = "Scanning for tags…";
+        try
+        {
+            await _scanner.RescanAsync(RootPath);
+            await RefreshTagsAsync();
+            StatusText = $"{Tags.Count} tag{(Tags.Count == 1 ? "" : "s")} in archive";
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    private async Task RefreshTagsAsync()
+    {
+        var counts = await _index.GetTagCountsAsync(RootPath);
+        var previous = Tags.ToDictionary(t => t.Name, t => t.State, StringComparer.Ordinal);
+        Tags.Clear();
+        foreach (var count in counts)
+        {
+            var tag = new TagFilterViewModel(count.Name, count.Count);
+            if (previous.TryGetValue(count.Name, out var state))
+                tag.State = state;
+            Tags.Add(tag);
+        }
+        RefreshVisibleTags();
+    }
+
+    // ---- loading / thumbnails ----
 
     private async Task LoadCurrentAsync(bool restoreScroll)
     {
@@ -95,30 +277,33 @@ public sealed partial class MainViewModel : ObservableObject
         if (entry is null) return;
 
         IsLoading = true;
-        CancelThumbnailLoads();
         try
         {
             CurrentPath = entry.Path;
             BuildBreadcrumbs(entry.Path);
 
             var folders = await Task.Run(() => _browser.ListFolders(entry.Path));
-
-            Items.Clear();
-            foreach (var folder in folders)
-                Items.Add(new FolderItemViewModel(folder));
-
+            ReplaceItems(folders.Select(f => new FolderItemViewModel(f)));
             StatusText = Items.Count == 1 ? "1 folder" : $"{Items.Count} folders";
             NotifyNavigationState();
 
             if (restoreScroll)
                 RestoreScrollRequested?.Invoke(entry.ScrollOffset);
-
-            _ = LoadThumbnailsAsync([.. Items]);
         }
         finally
         {
             IsLoading = false;
         }
+    }
+
+    private void ReplaceItems(IEnumerable<FolderItemViewModel> items)
+    {
+        CancelThumbnailLoads();
+        SelectedItem = null;
+        Items.Clear();
+        foreach (var item in items)
+            Items.Add(item);
+        _ = LoadThumbnailsAsync([.. Items]);
     }
 
     private async Task LoadThumbnailsAsync(IReadOnlyList<FolderItemViewModel> items)
@@ -134,8 +319,7 @@ public sealed partial class MainViewModel : ObservableObject
                 await gate.WaitAsync(token).ConfigureAwait(false);
                 try
                 {
-                    var image = await _thumbnails.GetThumbnailAsync(item.FullPath, ThumbnailSize, token)
-                        .ConfigureAwait(false);
+                    var image = await _thumbnails.GetThumbnailAsync(item.FullPath, ThumbnailSize, token).ConfigureAwait(false);
                     if (image is not null && !token.IsCancellationRequested)
                         _uiContext.Post(_ => item.Thumbnail = image, null);
                 }
@@ -144,7 +328,7 @@ public sealed partial class MainViewModel : ObservableObject
                     gate.Release();
                 }
             }
-            catch (OperationCanceledException) { /* navigation moved on */ }
+            catch (OperationCanceledException) { }
             catch { /* ignore per-item thumbnail failures */ }
         });
 
@@ -157,6 +341,12 @@ public sealed partial class MainViewModel : ObservableObject
         _thumbnailCts?.Cancel();
         _thumbnailCts?.Dispose();
         _thumbnailCts = null;
+    }
+
+    private void SaveCurrentScroll()
+    {
+        if (ScrollOffsetProvider is not null)
+            _history.SaveScrollOffset(ScrollOffsetProvider());
     }
 
     private void BuildBreadcrumbs(string path)
@@ -177,5 +367,17 @@ public sealed partial class MainViewModel : ObservableObject
         GoBackCommand.NotifyCanExecuteChanged();
         GoForwardCommand.NotifyCanExecuteChanged();
         GoUpCommand.NotifyCanExecuteChanged();
+    }
+
+    partial void OnRootPathChanged(string? value)
+    {
+        OnPropertyChanged(nameof(HasRoot));
+        RescanCommand.NotifyCanExecuteChanged();
+    }
+
+    partial void OnSelectedItemChanged(FolderItemViewModel? value)
+    {
+        OnPropertyChanged(nameof(HasSelection));
+        AddTagCommand.NotifyCanExecuteChanged();
     }
 }

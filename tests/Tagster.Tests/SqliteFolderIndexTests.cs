@@ -124,4 +124,27 @@ public class SqliteFolderIndexTests
         Assert.Single(all);
         Assert.Equal("a", all[0].Name);
     }
+
+    [Fact]
+    public async Task Search_and_counts_can_be_scoped_to_a_root()
+    {
+        using var db = new TempDb();
+        await db.Index.UpsertAsync(Folder("a", "док"));
+        await db.Index.UpsertAsync(new TaggedFolder
+        {
+            Id = Guid.NewGuid(),
+            RootPath = @"D:\other",
+            RelativePath = "b",
+            Name = "b",
+            Tags = ["док"],
+            UpdatedUtc = DateTimeOffset.UnixEpoch,
+        });
+
+        var scoped = await db.Index.SearchAsync(new SearchQuery { Include = ["док"] }, @"C:\archive");
+        Assert.Single(scoped);
+        Assert.Equal("a", scoped[0].Name);
+
+        Assert.Equal(1, (await db.Index.GetTagCountsAsync(@"C:\archive")).Single(c => c.Name == "док").Count);
+        Assert.Equal(2, (await db.Index.SearchAsync(new SearchQuery { Include = ["док"] })).Count);
+    }
 }
