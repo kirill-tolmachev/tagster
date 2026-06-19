@@ -10,6 +10,7 @@ public static class CoreServiceCollectionExtensions
     {
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton<ISidecarStore, SidecarStore>();
+        services.TryAddSingleton<IFolderBrowser, FolderBrowser>();
         services.TryAddSingleton<TaggingService>();
         services.TryAddSingleton<ArchiveScanner>();
         return services;

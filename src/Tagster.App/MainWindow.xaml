@@ -1,0 +1,95 @@
+<Window x:Class="Tagster.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vwp="clr-namespace:WpfToolkit.Controls;assembly=VirtualizingWrapPanel"
+        Title="Tagster" Height="720" Width="1120"
+        WindowStartupLocation="CenterScreen">
+
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis" />
+    </Window.Resources>
+
+    <DockPanel>
+        <!-- Toolbar: navigation + address + open-folder -->
+        <DockPanel DockPanel.Dock="Top" Margin="8,8,8,4">
+            <Button Content="←" Width="36" Margin="0,0,4,0" ToolTip="Back"
+                    Command="{Binding GoBackCommand}" />
+            <Button Content="→" Width="36" Margin="0,0,4,0" ToolTip="Forward"
+                    Command="{Binding GoForwardCommand}" />
+            <Button Content="↑" Width="36" Margin="0,0,8,0" ToolTip="Up"
+                    Command="{Binding GoUpCommand}" />
+            <Button Content="Open folder…" DockPanel.Dock="Right" Margin="8,0,0,0" Padding="10,0"
+                    Click="OnOpenFolderClick" />
+            <TextBox x:Name="AddressBox" VerticalContentAlignment="Center" Padding="4,2"
+                     Text="{Binding CurrentPath, Mode=OneWay}" KeyDown="OnAddressKeyDown" />
+        </DockPanel>
+
+        <!-- Breadcrumb -->
+        <ItemsControl DockPanel.Dock="Top" ItemsSource="{Binding Breadcrumbs}" Margin="8,0,8,6">
+            <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                    <StackPanel Orientation="Horizontal" />
+                </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                    <StackPanel Orientation="Horizontal">
+                        <Button Content="{Binding Name}" Padding="6,1" Margin="0,0,2,0"
+                                Command="{Binding DataContext.OpenCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                CommandParameter="{Binding FullPath}" />
+                        <TextBlock Text="›" Foreground="Gray" VerticalAlignment="Center" Margin="0,0,2,0" />
+                    </StackPanel>
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
+        <!-- Status bar -->
+        <Border DockPanel.Dock="Bottom" Background="#F3F3F3" Padding="8,3">
+            <TextBlock Text="{Binding StatusText}" />
+        </Border>
+
+        <!-- Folder grid (UI-virtualized wrap of thumbnail tiles) -->
+        <ListBox x:Name="FolderGrid"
+                 ItemsSource="{Binding Items}"
+                 BorderThickness="0"
+                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                 ScrollViewer.VerticalScrollBarVisibility="Auto"
+                 VirtualizingPanel.IsVirtualizing="True"
+                 VirtualizingPanel.VirtualizationMode="Recycling"
+                 VirtualizingPanel.ScrollUnit="Pixel"
+                 VirtualizingPanel.CacheLengthUnit="Page"
+                 VirtualizingPanel.CacheLength="1,2"
+                 HorizontalContentAlignment="Stretch">
+            <ListBox.ItemsPanel>
+                <ItemsPanelTemplate>
+                    <vwp:VirtualizingWrapPanel Orientation="Vertical" SpacingMode="StartAndEndOnly" StretchItems="False" />
+                </ItemsPanelTemplate>
+            </ListBox.ItemsPanel>
+            <ListBox.ItemContainerStyle>
+                <Style TargetType="ListBoxItem">
+                    <Setter Property="Padding" Value="0" />
+                    <EventSetter Event="MouseDoubleClick" Handler="OnItemDoubleClick" />
+                </Style>
+            </ListBox.ItemContainerStyle>
+            <ListBox.ItemTemplate>
+                <DataTemplate>
+                    <Border Width="148" Margin="6" Padding="6">
+                        <StackPanel>
+                            <Grid Width="128" Height="128" HorizontalAlignment="Center">
+                                <Border Background="#FFF7F7F7" CornerRadius="4" />
+                                <Image Source="{Binding Thumbnail}" Stretch="Uniform"
+                                       RenderOptions.BitmapScalingMode="HighQuality" />
+                                <Border Width="12" Height="12" CornerRadius="6" Background="#3B82F6"
+                                        HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,2,2,0"
+                                        Visibility="{Binding IsTagged, Converter={StaticResource BoolToVis}}"
+                                        ToolTip="{Binding TagsTooltip}" />
+                            </Grid>
+                            <TextBlock Text="{Binding Name}" TextAlignment="Center" TextTrimming="CharacterEllipsis"
+                                       MaxWidth="136" Margin="0,4,0,0" ToolTip="{Binding TagsTooltip}" />
+                        </StackPanel>
+                    </Border>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+    </DockPanel>
+</Window>
