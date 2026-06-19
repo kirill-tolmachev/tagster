@@ -1,0 +1,43 @@
+## .NET / Visual Studio
+bin/
+obj/
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+artifacts/
+
+## Rider / ReSharper
+.idea/
+*.DotSettings.user
+
+## VS Code
+.vscode/
+
+## Test / coverage results
+[Tt]est[Rr]esult*/
+*.trx
+*.coverage
+*.coveragexml
+coverage*.json
+coverage*.xml
+coverage*.info
+
+## NuGet
+*.nupkg
+*.snupkg
+.nuget/
+packages/
+!**/packages/build/
+
+## Tagster runtime data (local SQLite index lives in %AppData%, never committed)
+*.db
+*.db-shm
+*.db-wal
+
+## OS noise
+Thumbs.db
+ehthumbs.db
+desktop.ini
+.DS_Store
