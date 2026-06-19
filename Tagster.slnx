@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Tagster.Core/Tagster.Core.csproj" />
+    <Project Path="src/Tagster.Data/Tagster.Data.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Tagster.Tests/Tagster.Tests.csproj" />
+  </Folder>
+</Solution>

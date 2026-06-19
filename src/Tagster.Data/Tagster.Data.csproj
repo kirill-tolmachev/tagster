@@ -1,0 +1,30 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Tagster.Core\Tagster.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Dapper" Version="2.1.79" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.9" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.9" />
+  </ItemGroup>
+
+  <!--
+    Security override: Microsoft.Data.Sqlite 10.0.9 pulls the native SQLite binary
+    SQLitePCLRaw.lib.e_sqlite3 2.1.11 transitively, which carries a known high-severity
+    advisory (NU1903 / GHSA-2m69-gcr7-jv3q). Pin the patched native build (versioned to the
+    SQLite release it contains) while leaving the managed SQLitePCLRaw stack unchanged.
+    Revisit when Microsoft.Data.Sqlite ships a release that bundles a patched native lib.
+  -->
+  <ItemGroup>
+    <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3" Version="3.50.3" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>
