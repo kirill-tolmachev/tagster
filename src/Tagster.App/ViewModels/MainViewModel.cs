@@ -22,6 +22,7 @@ public sealed partial class MainViewModel : ObservableObject
     private readonly TaggingService _tagging;
     private readonly ArchiveScanner _scanner;
     private readonly ITagManager _tagManager;
+    private readonly IFolderCoverService _covers;
     private readonly NavigationHistory _history = new();
     private readonly SynchronizationContext _uiContext;
 
@@ -33,7 +34,8 @@ public sealed partial class MainViewModel : ObservableObject
         IFolderIndex index,
         TaggingService tagging,
         ArchiveScanner scanner,
-        ITagManager tagManager)
+        ITagManager tagManager,
+        IFolderCoverService covers)
     {
         _browser = browser;
         _thumbnails = thumbnails;
@@ -41,6 +43,7 @@ public sealed partial class MainViewModel : ObservableObject
         _tagging = tagging;
         _scanner = scanner;
         _tagManager = tagManager;
+        _covers = covers;
         _uiContext = SynchronizationContext.Current ?? new SynchronizationContext();
     }
 
@@ -213,6 +216,61 @@ public sealed partial class MainViewModel : ObservableObject
             ? RootPath
             : Directory.GetParent(folderPath)?.FullName ?? folderPath;
 
+    // ---- folder covers ----
+
+    /// <summary>Generate and apply a cover for the selected folder from the given image.</summary>
+    public async Task SetCoverAsync(string imagePath)
+    {
+        var item = SelectedItem;
+        if (item is null) return;
+
+        IsLoading = true;
+        try
+        {
+            var source = await Task.Run(() => _covers.SetCover(item.FullPath, imagePath));
+            _tagging.SetCover(item.FullPath, source);
+            _thumbnails.Invalidate(item.FullPath);
+            await ReloadThumbnailAsync(item);
+            StatusText = $"Cover set for {item.Name}";
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Couldn't set cover: {ex.Message}";
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    [RelayCommand(CanExecute = nameof(HasSelection))]
+    private async Task RemoveCover()
+    {
+        var item = SelectedItem;
+        if (item is null) return;
+
+        try
+        {
+            await Task.Run(() => _covers.RemoveCover(item.FullPath));
+            _tagging.RemoveCover(item.FullPath);
+            _thumbnails.Invalidate(item.FullPath);
+            await ReloadThumbnailAsync(item);
+            StatusText = $"Cover removed for {item.Name}";
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Couldn't remove cover: {ex.Message}";
+        }
+    }
+
+    private async Task ReloadThumbnailAsync(FolderItemViewModel item)
+    {
+        item.Thumbnail = null;
+        var image = await _thumbnails.GetThumbnailAsync(item.FullPath, ThumbnailSize);
+        if (image is not null)
+            item.Thumbnail = image;
+    }
+
     // ---- tag management (rename / delete) ----
 
     public async Task RenameTagAsync(TagFilterViewModel tag, string newName)
@@ -379,5 +437,6 @@ public sealed partial class MainViewModel : ObservableObject
     {
         OnPropertyChanged(nameof(HasSelection));
         AddTagCommand.NotifyCanExecuteChanged();
+        RemoveCoverCommand.NotifyCanExecuteChanged();
     }
 }

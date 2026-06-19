@@ -113,6 +113,10 @@
                         <Run Text="Tags for " />
                         <Run Text="{Binding SelectedItem.Name, Mode=OneWay}" FontWeight="Bold" />
                     </TextBlock>
+                    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,6">
+                        <Button Content="Set cover…" Padding="8,0" Margin="0,0,6,0" Click="OnSetCoverClick" />
+                        <Button Content="Remove cover" Padding="8,0" Command="{Binding RemoveCoverCommand}" />
+                    </StackPanel>
                     <DockPanel DockPanel.Dock="Bottom" Margin="0,6,0,0">
                         <Button DockPanel.Dock="Right" Content="Add tag" Margin="4,0,0,0" Padding="10,0"
                                 Command="{Binding AddTagCommand}" />

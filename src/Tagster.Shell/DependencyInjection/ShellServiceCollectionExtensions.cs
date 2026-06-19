@@ -9,6 +9,7 @@ public static class ShellServiceCollectionExtensions
     public static IServiceCollection AddTagsterShell(this IServiceCollection services)
     {
         services.TryAddSingleton<IThumbnailService, ShellThumbnailService>();
+        services.TryAddSingleton<IFolderCoverService, FolderCoverService>();
         return services;
     }
 }

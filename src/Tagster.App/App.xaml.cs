@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Threading;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Tagster.Shell;
 
 namespace Tagster.App;
 
@@ -25,6 +26,14 @@ public partial class App : Application
 
         _host = builder.Build();
         await _host.StartAsync();
+
+        if (e.Args.Contains("--cover-test"))
+        {
+            var report = CoverSelfTest.Run(_host.Services.GetRequiredService<IFolderCoverService>());
+            Console.WriteLine(report.Message);
+            _ = Dispatcher.BeginInvoke(new Action(() => Shutdown(report.Ok ? 0 : 1)), DispatcherPriority.ApplicationIdle);
+            return;
+        }
 
         // Constructing the window parses all XAML and resolves the DI graph.
         var window = _host.Services.GetRequiredService<MainWindow>();

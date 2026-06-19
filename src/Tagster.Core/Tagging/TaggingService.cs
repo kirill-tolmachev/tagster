@@ -70,4 +70,29 @@ public sealed class TaggingService(ISidecarStore sidecars, IFolderIndex index, T
             UpdatedUtc = now,
         }, cancellationToken);
     }
+
+    /// <summary>Record (or replace) a folder's cover in its sidecar, preserving its tags.</summary>
+    public void SetCover(string folderAbsolutePath, string coverSource)
+    {
+        var now = time.GetUtcNow();
+        var cover = new CoverInfo { Source = coverSource, SetUtc = now };
+        var existing = sidecars.TryRead(folderAbsolutePath);
+        sidecars.Write(folderAbsolutePath, existing is null
+            ? new Sidecar { Id = Guid.NewGuid(), Tags = [], Cover = cover, UpdatedUtc = now }
+            : existing with { Cover = cover, UpdatedUtc = now });
+    }
+
+    /// <summary>Clear a folder's cover; removes the sidecar entirely if no tags remain.</summary>
+    public void RemoveCover(string folderAbsolutePath)
+    {
+        var existing = sidecars.TryRead(folderAbsolutePath);
+        if (existing is null) return;
+
+        if (existing.Tags.Count == 0)
+        {
+            sidecars.Delete(folderAbsolutePath);
+            return;
+        }
+        sidecars.Write(folderAbsolutePath, existing with { Cover = null, UpdatedUtc = time.GetUtcNow() });
+    }
 }

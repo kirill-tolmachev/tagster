@@ -42,6 +42,20 @@ public partial class MainWindow : Window
             await _viewModel.OpenRootAsync(dialog.FolderName);
     }
 
+    private async void OnSetCoverClick(object sender, RoutedEventArgs e)
+    {
+        if (_viewModel.SelectedItem is null) return;
+
+        var dialog = new OpenFileDialog
+        {
+            Title = "Choose a cover image",
+            InitialDirectory = _viewModel.SelectedItem.FullPath,
+            Filter = "Images|*.jpg;*.jpeg;*.png;*.bmp;*.gif;*.tif;*.tiff|All files|*.*",
+        };
+        if (dialog.ShowDialog(this) == true)
+            await _viewModel.SetCoverAsync(dialog.FileName);
+    }
+
     private async void OnTagClick(object sender, MouseButtonEventArgs e)
     {
         if (sender is FrameworkElement { DataContext: TagFilterViewModel tag })

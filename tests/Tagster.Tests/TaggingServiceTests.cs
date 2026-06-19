@@ -89,4 +89,56 @@ public class TaggingServiceTests
 
         Assert.Equal(first, second);
     }
+
+    [Fact]
+    public async Task SetCover_records_cover_and_keeps_tags()
+    {
+        using var temp = new TempDir();
+        var (service, sidecars, db) = Make();
+        using var _ = db;
+        var folder = temp.CreateFolder("a");
+        await service.SetTagsAsync(temp.Path, folder, ["x"]);
+
+        service.SetCover(folder, ".tagster_cover.png");
+
+        var sidecar = sidecars.TryRead(folder);
+        Assert.Equal(".tagster_cover.png", sidecar!.Cover!.Source);
+        Assert.Equal(new[] { "x" }, sidecar.Tags);
+    }
+
+    [Fact]
+    public void SetCover_creates_sidecar_for_an_untagged_folder()
+    {
+        using var temp = new TempDir();
+        var (service, sidecars, db) = Make();
+        using var _ = db;
+        var folder = temp.CreateFolder("a");
+
+        service.SetCover(folder, ".tagster_cover.png");
+
+        var sidecar = sidecars.TryRead(folder);
+        Assert.NotNull(sidecar);
+        Assert.Empty(sidecar!.Tags);
+        Assert.NotNull(sidecar.Cover);
+    }
+
+    [Fact]
+    public async Task RemoveCover_keeps_tagged_folder_but_drops_a_cover_only_one()
+    {
+        using var temp = new TempDir();
+        var (service, sidecars, db) = Make();
+        using var _ = db;
+
+        var tagged = temp.CreateFolder("tagged");
+        await service.SetTagsAsync(temp.Path, tagged, ["x"]);
+        service.SetCover(tagged, ".tagster_cover.png");
+        service.RemoveCover(tagged);
+        Assert.Null(sidecars.TryRead(tagged)!.Cover);
+        Assert.Equal(new[] { "x" }, sidecars.TryRead(tagged)!.Tags);
+
+        var coverOnly = temp.CreateFolder("coveronly");
+        service.SetCover(coverOnly, ".tagster_cover.png");
+        service.RemoveCover(coverOnly);
+        Assert.Null(sidecars.TryRead(coverOnly));
+    }
 }
