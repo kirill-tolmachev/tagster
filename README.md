@@ -97,5 +97,3 @@ when reporting a problem.
 | `src/Tagster.Shell` | Win32/WPF interop: shell thumbnails, folder covers, Explorer integration |
 | `src/Tagster.App` | WPF app — MVVM (CommunityToolkit.Mvvm), generic-host DI, Fluent UI (WPF-UI) |
 | `tests/Tagster.Tests` | xUnit suite |
-
-See **[PLAN.md](PLAN.md)** for the architecture and the decisions behind it.
