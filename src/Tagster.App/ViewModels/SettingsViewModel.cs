@@ -1,4 +1,5 @@
 using CommunityToolkit.Mvvm.ComponentModel;
+using Microsoft.Extensions.Logging;
 using Tagster.Shell;
 
 namespace Tagster.App;
@@ -8,6 +9,7 @@ public sealed partial class SettingsViewModel : ObservableObject
 {
     private readonly IExplorerIntegration _integration;
     private readonly SettingsStore _settingsStore;
+    private readonly ILogger<SettingsViewModel> _log;
     private readonly bool _loaded;
 
     [ObservableProperty] private bool _explorerMenuEnabled;
@@ -15,10 +17,11 @@ public sealed partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private string? _lastArchivePath;
     [ObservableProperty] private string? _statusMessage;
 
-    public SettingsViewModel(IExplorerIntegration integration, SettingsStore settingsStore)
+    public SettingsViewModel(IExplorerIntegration integration, SettingsStore settingsStore, ILogger<SettingsViewModel> logger)
     {
         _integration = integration;
         _settingsStore = settingsStore;
+        _log = logger;
 
         var settings = _settingsStore.Load();
         ExplorerMenuEnabled = _integration.IsRegistered;
@@ -40,6 +43,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         }
         catch (Exception ex)
         {
+            _log.LogError(ex, "Failed to update the Explorer integration");
             StatusMessage = "Couldn't update the menu: " + ex.Message;
         }
     }

@@ -10,4 +10,7 @@ internal static class AppPaths
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Tagster");
 
     public static string IndexDatabasePath { get; } = Path.Combine(DataDirectory, "index.db");
+
+    /// <summary><c>%AppData%\Tagster\logs</c> — rolling Serilog text logs.</summary>
+    public static string LogsDirectory { get; } = Path.Combine(DataDirectory, "logs");
 }

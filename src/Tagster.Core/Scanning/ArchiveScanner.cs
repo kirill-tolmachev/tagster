@@ -1,3 +1,6 @@
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+
 namespace Tagster.Core;
 
 /// <summary>
@@ -5,8 +8,10 @@ namespace Tagster.Core;
 /// portable. Reconciles by folder identity (so renames/moves are tracked), and re-identifies the
 /// duplicate GUIDs produced when a tagged folder is copy/pasted.
 /// </summary>
-public sealed class ArchiveScanner(ISidecarStore sidecars, IFolderIndex index, TimeProvider time)
+public sealed class ArchiveScanner(ISidecarStore sidecars, IFolderIndex index, TimeProvider time, ILogger<ArchiveScanner>? logger = null)
 {
+    private readonly ILogger _log = logger ?? NullLogger<ArchiveScanner>.Instance;
+
     public async Task<ScanResult> RescanAsync(string rootPath, ScanOptions? options = null,
         CancellationToken cancellationToken = default)
     {
@@ -90,7 +95,7 @@ public sealed class ArchiveScanner(ISidecarStore sidecars, IFolderIndex index, T
     }
 
     /// <summary>Depth-bounded directory walk that skips reparse points and unreadable folders.</summary>
-    private static IEnumerable<string> EnumerateDirectories(string root, int maxDepth, CancellationToken ct)
+    private IEnumerable<string> EnumerateDirectories(string root, int maxDepth, CancellationToken ct)
     {
         var stack = new Stack<(string Path, int Depth)>();
         stack.Push((root, 0));
@@ -107,6 +112,7 @@ public sealed class ArchiveScanner(ISidecarStore sidecars, IFolderIndex index, T
             }
             catch (Exception ex) when (ex is UnauthorizedAccessException or DirectoryNotFoundException or IOException)
             {
+                _log.LogDebug(ex, "Skipping unreadable directory {Path} during scan", path);
                 continue;
             }
 
@@ -119,6 +125,7 @@ public sealed class ArchiveScanner(ISidecarStore sidecars, IFolderIndex index, T
                 }
                 catch (Exception ex) when (ex is UnauthorizedAccessException or FileNotFoundException or IOException)
                 {
+                    _log.LogDebug(ex, "Skipping folder with unreadable attributes {Child}", child);
                     continue;
                 }
 

@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Microsoft.Extensions.Logging;
 using Tagster.Core;
 using Tagster.Shell;
 
@@ -23,6 +24,7 @@ public sealed partial class MainViewModel : ObservableObject
     private readonly ArchiveScanner _scanner;
     private readonly ITagManager _tagManager;
     private readonly IFolderCoverService _covers;
+    private readonly ILogger<MainViewModel> _log;
     private readonly NavigationHistory _history = new();
     private readonly SynchronizationContext _uiContext;
 
@@ -35,7 +37,8 @@ public sealed partial class MainViewModel : ObservableObject
         TaggingService tagging,
         ArchiveScanner scanner,
         ITagManager tagManager,
-        IFolderCoverService covers)
+        IFolderCoverService covers,
+        ILogger<MainViewModel> logger)
     {
         _browser = browser;
         _thumbnails = thumbnails;
@@ -44,6 +47,7 @@ public sealed partial class MainViewModel : ObservableObject
         _scanner = scanner;
         _tagManager = tagManager;
         _covers = covers;
+        _log = logger;
         _uiContext = SynchronizationContext.Current ?? new SynchronizationContext();
     }
 
@@ -258,6 +262,7 @@ public sealed partial class MainViewModel : ObservableObject
         }
         catch (Exception ex)
         {
+            _log.LogError(ex, "Failed to set cover for {Folder}", item.FullPath);
             StatusText = $"Couldn't set cover: {ex.Message}";
         }
         finally
@@ -282,6 +287,7 @@ public sealed partial class MainViewModel : ObservableObject
         }
         catch (Exception ex)
         {
+            _log.LogError(ex, "Failed to remove cover for {Folder}", item.FullPath);
             StatusText = $"Couldn't remove cover: {ex.Message}";
         }
     }
@@ -410,7 +416,7 @@ public sealed partial class MainViewModel : ObservableObject
                 }
             }
             catch (OperationCanceledException) { }
-            catch { /* ignore per-item thumbnail failures */ }
+            catch (Exception ex) { _log.LogDebug(ex, "Thumbnail load failed for {Path}", item.FullPath); }
         });
 
         try { await Task.WhenAll(tasks); }

@@ -1,10 +1,14 @@
 using System.Globalization;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Tagster.Core;
 
 /// <inheritdoc />
-public sealed class FolderBrowser(ISidecarStore sidecars) : IFolderBrowser
+public sealed class FolderBrowser(ISidecarStore sidecars, ILogger<FolderBrowser>? logger = null) : IFolderBrowser
 {
+    private readonly ILogger _log = logger ?? NullLogger<FolderBrowser>.Instance;
+
     public IReadOnlyList<FolderEntry> ListFolders(string path)
     {
         IEnumerable<string> directories;
@@ -14,6 +18,7 @@ public sealed class FolderBrowser(ISidecarStore sidecars) : IFolderBrowser
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or DirectoryNotFoundException or IOException)
         {
+            _log.LogDebug(ex, "Could not list folders under {Path}", path);
             return [];
         }
 
@@ -27,6 +32,7 @@ public sealed class FolderBrowser(ISidecarStore sidecars) : IFolderBrowser
             }
             catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
             {
+                _log.LogDebug(ex, "Skipping unreadable folder {Directory}", directory);
                 continue;
             }
 

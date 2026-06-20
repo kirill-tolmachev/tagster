@@ -3,6 +3,9 @@ using System.Windows;
 using System.Windows.Threading;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Serilog;
+using Serilog.Events;
 using Tagster.Shell;
 
 namespace Tagster.App;
@@ -16,13 +19,20 @@ public partial class App : Application
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
         Directory.CreateDirectory(AppPaths.DataDirectory);
+        Directory.CreateDirectory(AppPaths.LogsDirectory);
+        ConfigureLogging();
+        HookGlobalExceptionHandlers();
+        Log.Information("Tagster {Version} starting. Args: {Args}",
+            typeof(App).Assembly.GetName().Version?.ToString() ?? "?", e.Args);
 
         var diagnostic = e.Args.Contains("--selftest")
             || e.Args.Contains("--cover-test")
             || e.Args.Contains("--integration-test")
             || e.Args.Contains("--make-icon")
-            || e.Args.Contains("--unregister");
+            || e.Args.Contains("--unregister")
+            || e.Args.Contains("--log-test");
 
         // Single instance: hand off to the already-running window if there is one.
         if (!diagnostic)
@@ -37,6 +47,8 @@ public partial class App : Application
         }
 
         var builder = Host.CreateApplicationBuilder();
+        builder.Logging.ClearProviders();
+        builder.Services.AddSerilog();
         builder.Services.AddTagsterCore();
         builder.Services.AddTagsterSqliteIndex(AppPaths.IndexDatabasePath);
         builder.Services.AddTagsterShell();
@@ -79,8 +91,14 @@ public partial class App : Application
         {
             // Used by the uninstaller to remove the per-user context-menu entries.
             try { _host.Services.GetRequiredService<IExplorerIntegration>().Unregister(); }
-            catch { /* best effort */ }
+            catch (Exception ex) { Log.Warning(ex, "Failed to unregister the context menu"); }
             _ = Dispatcher.BeginInvoke(new Action(() => Shutdown(0)), DispatcherPriority.ApplicationIdle);
+            return;
+        }
+
+        if (e.Args.Contains("--log-test"))
+        {
+            _ = Dispatcher.BeginInvoke(new Action(() => Shutdown(RunLogTest() ? 0 : 1)), DispatcherPriority.ApplicationIdle);
             return;
         }
 
@@ -110,7 +128,6 @@ public partial class App : Application
             }
         };
 
-        // Constructing the window parses all XAML and resolves the DI graph.
         _mainWindow = _host.Services.GetRequiredService<MainWindow>();
 
         if (e.Args.Contains("--selftest"))
@@ -140,14 +157,82 @@ public partial class App : Application
         _mainWindow.Activate();
     }
 
+    private static void ConfigureLogging()
+    {
+        Log.Logger = new LoggerConfiguration()
+            .MinimumLevel.Information()
+            .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
+            .MinimumLevel.Override("System", LogEventLevel.Warning)
+            .Enrich.FromLogContext()
+            .WriteTo.File(
+                Path.Combine(AppPaths.LogsDirectory, "tagster-.log"),
+                rollingInterval: RollingInterval.Day,
+                retainedFileCountLimit: 31,
+                outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff} [{Level:u3}] {SourceContext} {Message:lj}{NewLine}{Exception}")
+            .CreateLogger();
+    }
+
+    private void HookGlobalExceptionHandlers()
+    {
+        // Exceptions raised on the UI thread.
+        DispatcherUnhandledException += (_, args) =>
+        {
+            Log.Fatal(args.Exception, "Unhandled exception on the UI thread");
+            MessageBox.Show(
+                "An unexpected error occurred and has been written to the log.\n\n" + args.Exception.Message,
+                "Tagster", MessageBoxButton.OK, MessageBoxImage.Error);
+            args.Handled = true; // keep the app alive; the error is logged
+        };
+
+        // Exceptions on any thread that nobody caught (usually fatal).
+        AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+        {
+            Log.Fatal(args.ExceptionObject as Exception, "Unhandled exception (terminating: {Terminating})", args.IsTerminating);
+            Log.CloseAndFlush();
+        };
+
+        // Exceptions from tasks that were never awaited/observed.
+        TaskScheduler.UnobservedTaskException += (_, args) =>
+        {
+            Log.Error(args.Exception, "Unobserved task exception");
+            args.SetObserved();
+        };
+    }
+
+    private bool RunLogTest()
+    {
+        var logger = _host!.Services.GetRequiredService<ILogger<App>>();
+        logger.LogInformation("log-test: ILogger<App> resolved via DI");
+        try
+        {
+            throw new InvalidOperationException("log-test deliberate exception");
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "log-test: exception logged via DI ILogger");
+        }
+        Log.Information("log-test: static Serilog Log");
+        Log.CloseAndFlush();
+
+        var latest = Directory.GetFiles(AppPaths.LogsDirectory, "tagster-*.log")
+            .OrderByDescending(f => f).FirstOrDefault();
+        var content = latest is not null ? File.ReadAllText(latest) : "";
+        var ok = content.Contains("log-test: exception logged via DI ILogger")
+            && content.Contains("log-test deliberate exception");
+        Console.WriteLine(ok ? "PASS: logging to file works (DI + static, with stack trace)" : "FAIL: log entries not found");
+        return ok;
+    }
+
     protected override async void OnExit(ExitEventArgs e)
     {
+        Log.Information("Tagster exiting");
         if (_host is not null)
         {
             await _host.StopAsync();
             _host.Dispose();
         }
         _singleInstance?.Dispose();
+        Log.CloseAndFlush();
         base.OnExit(e);
     }
 }

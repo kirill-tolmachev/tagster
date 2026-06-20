@@ -1,11 +1,15 @@
 using System.IO;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Win32;
 
 namespace Tagster.Shell;
 
 /// <inheritdoc />
-public sealed class ExplorerIntegrationService : IExplorerIntegration
+public sealed class ExplorerIntegrationService(ILogger<ExplorerIntegrationService>? logger = null) : IExplorerIntegration
 {
+    private readonly ILogger _log = logger ?? NullLogger<ExplorerIntegrationService>.Instance;
+
     private const string FolderShell = @"Software\Classes\Directory\shell\";
     private const string BackgroundShell = @"Software\Classes\Directory\Background\shell\";
     private const string OpenVerb = "Tagster.Open";
@@ -47,7 +51,7 @@ public sealed class ExplorerIntegrationService : IExplorerIntegration
         commandKey.SetValue(null, command);
     }
 
-    private static void Delete(string keyPath)
+    private void Delete(string keyPath)
     {
         try
         {
@@ -55,7 +59,7 @@ public sealed class ExplorerIntegrationService : IExplorerIntegration
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
         {
-            // ignore — nothing we can do without rights we don't have for HKCU normally
+            _log.LogWarning(ex, "Could not remove shell registry key {Key}", keyPath);
         }
     }
 }

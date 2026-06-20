@@ -1,14 +1,18 @@
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Tagster.Core;
 
 /// <inheritdoc />
-public sealed class SidecarStore : ISidecarStore
+public sealed class SidecarStore(ILogger<SidecarStore>? logger = null) : ISidecarStore
 {
     /// <summary>The fixed sidecar file name written into each tagged folder.</summary>
     public const string FileName = ".tagster";
+
+    private readonly ILogger _log = logger ?? NullLogger<SidecarStore>.Instance;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -30,6 +34,7 @@ public sealed class SidecarStore : ISidecarStore
         }
         catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
         {
+            _log.LogWarning(ex, "Unreadable or corrupt sidecar in {Folder}", folderPath);
             return null;
         }
     }
@@ -59,7 +64,7 @@ public sealed class SidecarStore : ISidecarStore
         File.Delete(path);
     }
 
-    private static void TrySetHidden(string path)
+    private void TrySetHidden(string path)
     {
         try
         {
@@ -67,7 +72,8 @@ public sealed class SidecarStore : ISidecarStore
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            // The hidden attribute is cosmetic; ignore on filesystems that don't support it.
+            // The hidden attribute is cosmetic; log and carry on.
+            _log.LogDebug(ex, "Could not set hidden attribute on {Path}", path);
         }
     }
 }

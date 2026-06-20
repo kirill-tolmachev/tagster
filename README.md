@@ -38,6 +38,12 @@ search. Turn on the right-click menu in **Settings**.
 dotnet test
 ```
 
+## Logs
+
+Tagster writes a daily rolling log to `%AppData%\Tagster\logs\tagster-<date>.log` (Serilog),
+capturing full stack traces for every exception — handled or unhandled. Attach the latest file
+when reporting a problem.
+
 ## Project layout
 
 | Project | What it holds |
