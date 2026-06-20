@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
+using System.IO;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 
 namespace Tagster.Shell;
 
@@ -17,11 +19,38 @@ public sealed class ShellThumbnailService : IThumbnailService
             var key = $"{size}|{path}";
             if (_cache.TryGetValue(key, out var cached)) return cached;
 
-            var image = NativeThumbnail.TryGetThumbnail(path, size);
+            // Prefer a folder's own Tagster cover so it shows immediately and isn't subject to
+            // Windows' shell thumbnail cache being stale right after the cover is set.
+            var image = TryLoadCover(path, size) ?? NativeThumbnail.TryGetThumbnail(path, size);
             if (image is not null)
-                _cache[key] = image; // already frozen by TryGetThumbnail
+                _cache[key] = image; // frozen by TryLoadCover / TryGetThumbnail
             return image;
         }, cancellationToken);
+
+    private static ImageSource? TryLoadCover(string folderPath, int size)
+    {
+        try
+        {
+            var coverPath = Path.Combine(folderPath, FolderCoverService.CoverSourceName);
+            if (!File.Exists(coverPath)) return null;
+
+            var image = new BitmapImage();
+            image.BeginInit();
+            image.CacheOption = BitmapCacheOption.OnLoad;
+            // IgnoreImageCache: covers always reuse the same file name, so without this WPF would
+            // return a previously-decoded image and the tile wouldn't update until the next launch.
+            image.CreateOptions = BitmapCreateOptions.IgnoreColorProfile | BitmapCreateOptions.IgnoreImageCache;
+            image.DecodePixelWidth = size;
+            image.UriSource = new Uri(coverPath);
+            image.EndInit();
+            image.Freeze();
+            return image;
+        }
+        catch
+        {
+            return null;
+        }
+    }
 
     public void Invalidate(string path)
     {

@@ -55,6 +55,7 @@ public sealed partial class MainViewModel : ObservableObject
     public ObservableCollection<BreadcrumbSegment> Breadcrumbs { get; } = [];
     public ObservableCollection<TagFilterViewModel> Tags { get; } = [];
     public ObservableCollection<TagFilterViewModel> VisibleTags { get; } = [];
+    public ObservableCollection<TagFilterViewModel> ActiveFilters { get; } = [];
 
     [ObservableProperty] private string _currentPath = "";
     [ObservableProperty] private string? _rootPath;
@@ -70,6 +71,12 @@ public sealed partial class MainViewModel : ObservableObject
     public bool CanGoUp => !string.IsNullOrEmpty(CurrentPath) && Directory.GetParent(CurrentPath) is not null;
     public bool HasRoot => RootPath is not null;
     public bool HasSelection => SelectedItem is not null;
+    public bool HasNoSelection => SelectedItem is null;
+    public bool IsArchiveOpen => RootPath is not null;
+    public bool HasActiveFilters => ActiveFilters.Count > 0;
+    public bool ShowOpenArchivePrompt => RootPath is null && !IsLoading;
+    public bool ShowNoResults => IsSearchMode && !IsLoading && Items.Count == 0;
+    public bool ShowEmptyFolder => !IsSearchMode && RootPath is not null && !IsLoading && Items.Count == 0;
 
     /// <summary>Set by the view: reads the grid's current vertical scroll offset.</summary>
     public Func<double>? ScrollOffsetProvider { get; set; }
@@ -169,6 +176,14 @@ public sealed partial class MainViewModel : ObservableObject
         tag.State = exclude
             ? (tag.State == TagFilterState.Exclude ? TagFilterState.None : TagFilterState.Exclude)
             : (tag.State == TagFilterState.Include ? TagFilterState.None : TagFilterState.Include);
+        UpdateActiveFilters();
+        await ApplyFiltersAsync();
+    }
+
+    public async Task RemoveActiveFilterAsync(TagFilterViewModel tag)
+    {
+        tag.State = TagFilterState.None;
+        UpdateActiveFilters();
         await ApplyFiltersAsync();
     }
 
@@ -184,6 +199,7 @@ public sealed partial class MainViewModel : ObservableObject
     {
         foreach (var tag in Tags)
             tag.State = TagFilterState.None;
+        UpdateActiveFilters();
     }
 
     private async Task ApplyFiltersAsync()
@@ -327,11 +343,14 @@ public sealed partial class MainViewModel : ObservableObject
     public async Task RescanAndRefreshTagsAsync()
     {
         if (RootPath is null) return;
+        var root = RootPath;
         IsLoading = true;
         StatusText = "Scanning for tags…";
         try
         {
-            await _scanner.RescanAsync(RootPath);
+            // Run the directory walk off the UI thread so a large archive (or a drive root)
+            // can't freeze the window.
+            await Task.Run(() => _scanner.RescanAsync(root));
             await RefreshTagsAsync();
             StatusText = $"{Tags.Count} tag{(Tags.Count == 1 ? "" : "s")} in archive";
         }
@@ -354,6 +373,7 @@ public sealed partial class MainViewModel : ObservableObject
             Tags.Add(tag);
         }
         RefreshVisibleTags();
+        UpdateActiveFilters();
     }
 
     // ---- loading / thumbnails ----
@@ -390,6 +410,7 @@ public sealed partial class MainViewModel : ObservableObject
         Items.Clear();
         foreach (var item in items)
             Items.Add(item);
+        NotifyEmptyStates();
         _ = LoadThumbnailsAsync([.. Items]);
     }
 
@@ -459,12 +480,35 @@ public sealed partial class MainViewModel : ObservableObject
     partial void OnRootPathChanged(string? value)
     {
         OnPropertyChanged(nameof(HasRoot));
+        OnPropertyChanged(nameof(IsArchiveOpen));
         RescanCommand.NotifyCanExecuteChanged();
+        NotifyEmptyStates();
+    }
+
+    partial void OnIsLoadingChanged(bool value) => NotifyEmptyStates();
+
+    partial void OnIsSearchModeChanged(bool value) => NotifyEmptyStates();
+
+    private void NotifyEmptyStates()
+    {
+        OnPropertyChanged(nameof(ShowOpenArchivePrompt));
+        OnPropertyChanged(nameof(ShowNoResults));
+        OnPropertyChanged(nameof(ShowEmptyFolder));
+    }
+
+    private void UpdateActiveFilters()
+    {
+        ActiveFilters.Clear();
+        foreach (var tag in Tags)
+            if (tag.State != TagFilterState.None)
+                ActiveFilters.Add(tag);
+        OnPropertyChanged(nameof(HasActiveFilters));
     }
 
     partial void OnSelectedItemChanged(FolderItemViewModel? value)
     {
         OnPropertyChanged(nameof(HasSelection));
+        OnPropertyChanged(nameof(HasNoSelection));
         AddTagCommand.NotifyCanExecuteChanged();
         RemoveCoverCommand.NotifyCanExecuteChanged();
     }

@@ -1,5 +1,7 @@
 using System.IO;
 using System.Windows;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -7,6 +9,7 @@ using Microsoft.Extensions.Logging;
 using Serilog;
 using Serilog.Events;
 using Tagster.Shell;
+using Wpf.Ui.Appearance;
 
 namespace Tagster.App;
 
@@ -15,6 +18,7 @@ public partial class App : Application
     private IHost? _host;
     private SingleInstanceManager? _singleInstance;
     private MainWindow? _mainWindow;
+    private bool _diagnosticMode;
 
     protected override async void OnStartup(StartupEventArgs e)
     {
@@ -23,19 +27,21 @@ public partial class App : Application
         Directory.CreateDirectory(AppPaths.DataDirectory);
         Directory.CreateDirectory(AppPaths.LogsDirectory);
         ConfigureLogging();
-        HookGlobalExceptionHandlers();
-        Log.Information("Tagster {Version} starting. Args: {Args}",
-            typeof(App).Assembly.GetName().Version?.ToString() ?? "?", e.Args);
-
-        var diagnostic = e.Args.Contains("--selftest")
+        _diagnosticMode = e.Args.Contains("--selftest")
             || e.Args.Contains("--cover-test")
             || e.Args.Contains("--integration-test")
             || e.Args.Contains("--make-icon")
             || e.Args.Contains("--unregister")
-            || e.Args.Contains("--log-test");
+            || e.Args.Contains("--log-test")
+            || e.Args.Contains("--showtest")
+            || e.Args.Contains("--screenshot");
+        HookGlobalExceptionHandlers();
+        ApplicationThemeManager.ApplySystemTheme();
+        Log.Information("Tagster {Version} starting. Args: {Args}",
+            typeof(App).Assembly.GetName().Version?.ToString() ?? "?", e.Args);
 
         // Single instance: hand off to the already-running window if there is one.
-        if (!diagnostic)
+        if (!_diagnosticMode)
         {
             _singleInstance = new SingleInstanceManager();
             if (!_singleInstance.TryAcquire())
@@ -130,6 +136,46 @@ public partial class App : Application
 
         _mainWindow = _host.Services.GetRequiredService<MainWindow>();
 
+        if (e.Args.Contains("--showtest"))
+        {
+            // Actually show the window so render/layout errors surface (then auto-close).
+            SystemThemeWatcher.Watch(_mainWindow);
+            _mainWindow.Show();
+            var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
+            timer.Tick += (_, _) => { timer.Stop(); Console.WriteLine("SHOWTEST: rendered OK"); Shutdown(0); };
+            timer.Start();
+            return;
+        }
+
+        if (e.Args.Contains("--screenshot"))
+        {
+            ApplicationThemeManager.Apply(Wpf.Ui.Appearance.ApplicationTheme.Light);
+            _mainWindow.Background = Brushes.White;
+            _mainWindow.Show();
+            var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2.5) };
+            timer.Tick += (_, _) =>
+            {
+                timer.Stop();
+                try
+                {
+                    var element = (FrameworkElement)_mainWindow.Content;
+                    var w = Math.Max(1, (int)element.ActualWidth);
+                    var h = Math.Max(1, (int)element.ActualHeight);
+                    var bitmap = new RenderTargetBitmap(w, h, 96, 96, PixelFormats.Pbgra32);
+                    bitmap.Render(element);
+                    var encoder = new PngBitmapEncoder();
+                    encoder.Frames.Add(BitmapFrame.Create(bitmap));
+                    var path = Path.Combine(AppPaths.LogsDirectory, "screenshot.png");
+                    using (var stream = File.Create(path)) encoder.Save(stream);
+                    Console.WriteLine($"SCREENSHOT {w}x{h}: {path}");
+                }
+                catch (Exception ex) { Console.WriteLine("SCREENSHOT FAIL: " + ex); }
+                Shutdown(0);
+            };
+            timer.Start();
+            return;
+        }
+
         if (e.Args.Contains("--selftest"))
         {
             _ = _host.Services.GetRequiredService<SettingsWindow>(); // validate its XAML too
@@ -138,6 +184,7 @@ public partial class App : Application
         }
 
         _singleInstance?.StartServer(args => Dispatcher.Invoke(() => OnActivated(args)));
+        SystemThemeWatcher.Watch(_mainWindow);
         _mainWindow.Show();
     }
 
@@ -178,10 +225,19 @@ public partial class App : Application
         DispatcherUnhandledException += (_, args) =>
         {
             Log.Fatal(args.Exception, "Unhandled exception on the UI thread");
+            args.Handled = true; // keep the app alive; the error is logged
+
+            if (_diagnosticMode)
+            {
+                // Headless runs must never block on a dialog.
+                Console.WriteLine("UI EXCEPTION: " + args.Exception);
+                Shutdown(1);
+                return;
+            }
+
             MessageBox.Show(
                 "An unexpected error occurred and has been written to the log.\n\n" + args.Exception.Message,
                 "Tagster", MessageBoxButton.OK, MessageBoxImage.Error);
-            args.Handled = true; // keep the app alive; the error is logged
         };
 
         // Exceptions on any thread that nobody caught (usually fatal).

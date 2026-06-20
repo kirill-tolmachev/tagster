@@ -2,7 +2,7 @@ using System.Windows;
 
 namespace Tagster.App;
 
-public partial class SettingsWindow : Window
+public partial class SettingsWindow
 {
     public SettingsWindow(SettingsViewModel viewModel)
     {

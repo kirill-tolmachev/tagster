@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -7,7 +8,7 @@ using Microsoft.Win32;
 
 namespace Tagster.App;
 
-public partial class MainWindow : Window
+public partial class MainWindow
 {
     private readonly MainViewModel _viewModel;
     private readonly Func<SettingsWindow> _settingsWindowFactory;
@@ -31,10 +32,17 @@ public partial class MainWindow : Window
             await _viewModel.NavigateToAsync(item.FullPath);
     }
 
-    private void OnAddressKeyDown(object sender, KeyEventArgs e)
+    private void OnOpenSelectedClick(object sender, RoutedEventArgs e)
     {
-        if (e.Key == Key.Enter && sender is TextBox box)
-            _viewModel.OpenCommand.Execute(box.Text);
+        if (_viewModel.SelectedItem is not { } item) return;
+        try
+        {
+            Process.Start(new ProcessStartInfo(item.FullPath) { UseShellExecute = true });
+        }
+        catch
+        {
+            // ignore failures to launch Explorer
+        }
     }
 
     private async void OnOpenFolderClick(object sender, RoutedEventArgs e)
@@ -44,20 +52,6 @@ public partial class MainWindow : Window
             await _viewModel.OpenRootAsync(dialog.FolderName);
     }
 
-    private async void OnSetCoverClick(object sender, RoutedEventArgs e)
-    {
-        if (_viewModel.SelectedItem is null) return;
-
-        var dialog = new OpenFileDialog
-        {
-            Title = "Choose a cover image",
-            InitialDirectory = _viewModel.SelectedItem.FullPath,
-            Filter = "Images|*.jpg;*.jpeg;*.png;*.bmp;*.gif;*.tif;*.tiff|All files|*.*",
-        };
-        if (dialog.ShowDialog(this) == true)
-            await _viewModel.SetCoverAsync(dialog.FileName);
-    }
-
     private void OnSettingsClick(object sender, RoutedEventArgs e)
     {
         var window = _settingsWindowFactory();
@@ -65,13 +59,22 @@ public partial class MainWindow : Window
         window.ShowDialog();
     }
 
-    private async void OnTagClick(object sender, MouseButtonEventArgs e)
+    private async void OnTagIncludeClick(object sender, RoutedEventArgs e)
     {
         if (sender is FrameworkElement { DataContext: TagFilterViewModel tag })
-        {
-            e.Handled = true;
-            await _viewModel.ToggleTagAsync(tag, Keyboard.Modifiers.HasFlag(ModifierKeys.Alt));
-        }
+            await _viewModel.ToggleTagAsync(tag, exclude: false);
+    }
+
+    private async void OnTagExcludeClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: TagFilterViewModel tag })
+            await _viewModel.ToggleTagAsync(tag, exclude: true);
+    }
+
+    private async void OnRemoveActiveFilter(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: TagFilterViewModel tag })
+            await _viewModel.RemoveActiveFilterAsync(tag);
     }
 
     private async void OnRenameTag(object sender, RoutedEventArgs e)
@@ -107,6 +110,20 @@ public partial class MainWindow : Window
     {
         if (e.Key == Key.Enter && _viewModel.AddTagCommand.CanExecute(null))
             _viewModel.AddTagCommand.Execute(null);
+    }
+
+    private async void OnSetCoverClick(object sender, RoutedEventArgs e)
+    {
+        if (_viewModel.SelectedItem is null) return;
+
+        var dialog = new OpenFileDialog
+        {
+            Title = "Choose a cover image",
+            InitialDirectory = _viewModel.SelectedItem.FullPath,
+            Filter = "Images|*.jpg;*.jpeg;*.png;*.bmp;*.gif;*.tif;*.tiff|All files|*.*",
+        };
+        if (dialog.ShowDialog(this) == true)
+            await _viewModel.SetCoverAsync(dialog.FileName);
     }
 
     private void OnRestoreScroll(double offset)
