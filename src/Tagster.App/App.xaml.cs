@@ -20,7 +20,9 @@ public partial class App : Application
 
         var diagnostic = e.Args.Contains("--selftest")
             || e.Args.Contains("--cover-test")
-            || e.Args.Contains("--integration-test");
+            || e.Args.Contains("--integration-test")
+            || e.Args.Contains("--make-icon")
+            || e.Args.Contains("--unregister");
 
         // Single instance: hand off to the already-running window if there is one.
         if (!diagnostic)
@@ -60,6 +62,25 @@ public partial class App : Application
             var report = IntegrationSelfTest.Run(_host.Services.GetRequiredService<IExplorerIntegration>());
             Console.WriteLine(report.Message);
             _ = Dispatcher.BeginInvoke(new Action(() => Shutdown(report.Ok ? 0 : 1)), DispatcherPriority.ApplicationIdle);
+            return;
+        }
+
+        if (e.Args.Contains("--make-icon"))
+        {
+            var index = Array.IndexOf(e.Args, "--make-icon");
+            var path = index >= 0 && index + 1 < e.Args.Length ? e.Args[index + 1] : "Tagster.ico";
+            IconFactory.Write(path);
+            Console.WriteLine("Icon written to " + path);
+            _ = Dispatcher.BeginInvoke(new Action(() => Shutdown(0)), DispatcherPriority.ApplicationIdle);
+            return;
+        }
+
+        if (e.Args.Contains("--unregister"))
+        {
+            // Used by the uninstaller to remove the per-user context-menu entries.
+            try { _host.Services.GetRequiredService<IExplorerIntegration>().Unregister(); }
+            catch { /* best effort */ }
+            _ = Dispatcher.BeginInvoke(new Action(() => Shutdown(0)), DispatcherPriority.ApplicationIdle);
             return;
         }
 

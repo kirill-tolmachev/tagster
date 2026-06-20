@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO;
 using System.Windows;
 using System.Windows.Media;
@@ -8,16 +9,11 @@ namespace Tagster.Shell;
 /// <summary>WPF imaging helpers used to build folder cover icons.</summary>
 internal static class ImageOps
 {
-    /// <summary>Load an image and center-crop it to a square.</summary>
+    /// <summary>Load an image, honour its EXIF orientation, and center-crop it to a square.</summary>
     public static BitmapSource LoadSquare(string path)
     {
-        var image = new BitmapImage();
-        image.BeginInit();
-        image.CacheOption = BitmapCacheOption.OnLoad;
-        image.CreateOptions = BitmapCreateOptions.IgnoreColorProfile;
-        image.UriSource = new Uri(path);
-        image.EndInit();
-        image.Freeze();
+        var frame = BitmapFrame.Create(new Uri(path), BitmapCreateOptions.IgnoreColorProfile, BitmapCacheOption.OnLoad);
+        var image = ApplyOrientation(frame);
 
         var side = Math.Min(image.PixelWidth, image.PixelHeight);
         var x = (image.PixelWidth - side) / 2;
@@ -25,6 +21,45 @@ internal static class ImageOps
         var cropped = new CroppedBitmap(image, new Int32Rect(x, y, side, side));
         cropped.Freeze();
         return cropped;
+    }
+
+    private static BitmapSource ApplyOrientation(BitmapFrame frame)
+    {
+        Transform? transform = ReadOrientation(frame) switch
+        {
+            3 => new RotateTransform(180),
+            6 => new RotateTransform(90),
+            8 => new RotateTransform(270),
+            _ => null,
+        };
+
+        if (transform is null)
+        {
+            frame.Freeze();
+            return frame;
+        }
+
+        var rotated = new TransformedBitmap(frame, transform);
+        rotated.Freeze();
+        return rotated;
+    }
+
+    private static ushort ReadOrientation(BitmapFrame frame)
+    {
+        try
+        {
+            if (frame.Metadata is BitmapMetadata metadata
+                && metadata.ContainsQuery("System.Photo.Orientation")
+                && metadata.GetQuery("System.Photo.Orientation") is { } value)
+            {
+                return Convert.ToUInt16(value, CultureInfo.InvariantCulture);
+            }
+        }
+        catch
+        {
+            // unreadable or missing orientation → treat as upright
+        }
+        return 1;
     }
 
     /// <summary>Render a source square into a crisp size×size bitmap.</summary>

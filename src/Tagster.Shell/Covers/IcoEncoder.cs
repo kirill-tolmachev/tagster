@@ -7,7 +7,7 @@ namespace Tagster.Shell;
 /// Writes a Windows .ico container with one PNG-compressed frame per size. Windows Vista+ reads
 /// PNG frames at any size, so a single all-PNG icon covers every display scale.
 /// </summary>
-internal static class IcoEncoder
+public static class IcoEncoder
 {
     public static byte[] Build(IEnumerable<BitmapSource> frames)
     {

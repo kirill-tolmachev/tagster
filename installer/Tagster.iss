@@ -6,7 +6,7 @@
 ; (Settings), so this installer makes no registry changes.
 
 #define MyAppName "Tagster"
-#define MyAppVersion "0.5.0"
+#define MyAppVersion "0.6.0"
 #define MyAppPublisher "Tagster"
 #define MyAppExeName "Tagster.exe"
 
@@ -23,6 +23,7 @@ AppPublisher={#MyAppPublisher}
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 UninstallDisplayIcon={app}\{#MyAppExeName}
+SetupIconFile=..\src\Tagster.App\Tagster.ico
 OutputDir=dist
 OutputBaseFilename=Tagster-{#MyAppVersion}-setup
 Compression=lzma2
@@ -41,6 +42,10 @@ Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubd
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+
+[UninstallRun]
+; Remove the per-user right-click menu entries (if the user enabled them) before files go.
+Filename: "{app}\{#MyAppExeName}"; Parameters: "--unregister"; Flags: runhidden; RunOnceId: "TagsterUnregister"
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch Tagster"; Flags: nowait postinstall skipifsilent

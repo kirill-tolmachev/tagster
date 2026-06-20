@@ -241,7 +241,13 @@ public sealed class SqliteFolderIndex : IFolderIndex, IDisposable
     private static string EscapeLike(string value)
         => value.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
 
-    public void Dispose() => SqliteConnection.ClearAllPools();
+    public void Dispose()
+    {
+        // Clear only this database's connection pool so its file can be released, without
+        // disturbing other SqliteFolderIndex instances (e.g. parallel test classes).
+        using var connection = new SqliteConnection(_connectionString);
+        SqliteConnection.ClearPool(connection);
+    }
 
     private const string FolderColumns =
         "id AS Id, root_path AS RootPath, relative_path AS RelativePath, name AS Name, updated_utc AS UpdatedUtc";
