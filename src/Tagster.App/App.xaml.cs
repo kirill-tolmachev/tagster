@@ -1,7 +1,5 @@
 using System.IO;
 using System.Windows;
-using System.Windows.Media;
-using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -32,9 +30,7 @@ public partial class App : Application
             || e.Args.Contains("--integration-test")
             || e.Args.Contains("--make-icon")
             || e.Args.Contains("--unregister")
-            || e.Args.Contains("--log-test")
-            || e.Args.Contains("--showtest")
-            || e.Args.Contains("--screenshot");
+            || e.Args.Contains("--log-test");
         HookGlobalExceptionHandlers();
         ApplicationThemeManager.ApplySystemTheme();
         Log.Information("Tagster {Version} starting. Args: {Args}",
@@ -135,46 +131,6 @@ public partial class App : Application
         };
 
         _mainWindow = _host.Services.GetRequiredService<MainWindow>();
-
-        if (e.Args.Contains("--showtest"))
-        {
-            // Actually show the window so render/layout errors surface (then auto-close).
-            SystemThemeWatcher.Watch(_mainWindow);
-            _mainWindow.Show();
-            var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
-            timer.Tick += (_, _) => { timer.Stop(); Console.WriteLine("SHOWTEST: rendered OK"); Shutdown(0); };
-            timer.Start();
-            return;
-        }
-
-        if (e.Args.Contains("--screenshot"))
-        {
-            ApplicationThemeManager.Apply(Wpf.Ui.Appearance.ApplicationTheme.Light);
-            _mainWindow.Background = Brushes.White;
-            _mainWindow.Show();
-            var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2.5) };
-            timer.Tick += (_, _) =>
-            {
-                timer.Stop();
-                try
-                {
-                    var element = (FrameworkElement)_mainWindow.Content;
-                    var w = Math.Max(1, (int)element.ActualWidth);
-                    var h = Math.Max(1, (int)element.ActualHeight);
-                    var bitmap = new RenderTargetBitmap(w, h, 96, 96, PixelFormats.Pbgra32);
-                    bitmap.Render(element);
-                    var encoder = new PngBitmapEncoder();
-                    encoder.Frames.Add(BitmapFrame.Create(bitmap));
-                    var path = Path.Combine(AppPaths.LogsDirectory, "screenshot.png");
-                    using (var stream = File.Create(path)) encoder.Save(stream);
-                    Console.WriteLine($"SCREENSHOT {w}x{h}: {path}");
-                }
-                catch (Exception ex) { Console.WriteLine("SCREENSHOT FAIL: " + ex); }
-                Shutdown(0);
-            };
-            timer.Start();
-            return;
-        }
 
         if (e.Args.Contains("--selftest"))
         {

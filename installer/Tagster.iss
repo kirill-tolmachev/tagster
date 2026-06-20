@@ -6,7 +6,7 @@
 ; (Settings), so this installer makes no registry changes.
 
 #define MyAppName "Tagster"
-#define MyAppVersion "0.6.0"
+#define MyAppVersion "0.1.0"
 #define MyAppPublisher "Tagster"
 #define MyAppExeName "Tagster.exe"
 
