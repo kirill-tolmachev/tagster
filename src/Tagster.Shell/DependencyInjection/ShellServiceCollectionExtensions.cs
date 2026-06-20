@@ -10,6 +10,7 @@ public static class ShellServiceCollectionExtensions
     {
         services.TryAddSingleton<IThumbnailService, ShellThumbnailService>();
         services.TryAddSingleton<IFolderCoverService, FolderCoverService>();
+        services.TryAddSingleton<IExplorerIntegration, ExplorerIntegrationService>();
         return services;
     }
 }

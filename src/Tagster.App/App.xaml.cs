@@ -10,20 +10,40 @@ namespace Tagster.App;
 public partial class App : Application
 {
     private IHost? _host;
+    private SingleInstanceManager? _singleInstance;
+    private MainWindow? _mainWindow;
 
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
-
         Directory.CreateDirectory(AppPaths.DataDirectory);
+
+        var diagnostic = e.Args.Contains("--selftest")
+            || e.Args.Contains("--cover-test")
+            || e.Args.Contains("--integration-test");
+
+        // Single instance: hand off to the already-running window if there is one.
+        if (!diagnostic)
+        {
+            _singleInstance = new SingleInstanceManager();
+            if (!_singleInstance.TryAcquire())
+            {
+                _singleInstance.SignalFirstInstance(e.Args);
+                Shutdown(0);
+                return;
+            }
+        }
 
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddTagsterCore();
         builder.Services.AddTagsterSqliteIndex(AppPaths.IndexDatabasePath);
         builder.Services.AddTagsterShell();
+        builder.Services.AddSingleton<SettingsStore>();
         builder.Services.AddSingleton<MainViewModel>();
         builder.Services.AddSingleton<MainWindow>();
-
+        builder.Services.AddTransient<SettingsViewModel>();
+        builder.Services.AddTransient<SettingsWindow>();
+        builder.Services.AddSingleton<Func<SettingsWindow>>(sp => () => sp.GetRequiredService<SettingsWindow>());
         _host = builder.Build();
         await _host.StartAsync();
 
@@ -35,17 +55,68 @@ public partial class App : Application
             return;
         }
 
+        if (e.Args.Contains("--integration-test"))
+        {
+            var report = IntegrationSelfTest.Run(_host.Services.GetRequiredService<IExplorerIntegration>());
+            Console.WriteLine(report.Message);
+            _ = Dispatcher.BeginInvoke(new Action(() => Shutdown(report.Ok ? 0 : 1)), DispatcherPriority.ApplicationIdle);
+            return;
+        }
+
+        var settingsStore = _host.Services.GetRequiredService<SettingsStore>();
+        var settings = settingsStore.Load();
+        var viewModel = _host.Services.GetRequiredService<MainViewModel>();
+
+        var (folder, edit) = CommandLine.Parse(e.Args);
+        if (folder is not null)
+        {
+            viewModel.StartupFolder = folder;
+            viewModel.StartupEdit = edit;
+        }
+        else if (settings.ReopenLastArchive && settings.LastArchivePath is not null && Directory.Exists(settings.LastArchivePath))
+        {
+            viewModel.StartupFolder = settings.LastArchivePath;
+        }
+
+        // Remember the archive whenever it changes.
+        viewModel.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(MainViewModel.RootPath) && viewModel.RootPath is not null)
+            {
+                var current = settingsStore.Load();
+                current.LastArchivePath = viewModel.RootPath;
+                settingsStore.Save(current);
+            }
+        };
+
         // Constructing the window parses all XAML and resolves the DI graph.
-        var window = _host.Services.GetRequiredService<MainWindow>();
+        _mainWindow = _host.Services.GetRequiredService<MainWindow>();
 
         if (e.Args.Contains("--selftest"))
         {
-            // Headless wiring check: we got here, so DI + XAML are valid. Exit cleanly.
+            _ = _host.Services.GetRequiredService<SettingsWindow>(); // validate its XAML too
             _ = Dispatcher.BeginInvoke(new Action(() => Shutdown(0)), DispatcherPriority.ApplicationIdle);
             return;
         }
 
-        window.Show();
+        _singleInstance?.StartServer(args => Dispatcher.Invoke(() => OnActivated(args)));
+        _mainWindow.Show();
+    }
+
+    private async void OnActivated(string[] args)
+    {
+        if (_host is null || _mainWindow is null) return;
+
+        var (folder, edit) = CommandLine.Parse(args);
+        if (folder is null) return;
+
+        var viewModel = _host.Services.GetRequiredService<MainViewModel>();
+        if (edit) await viewModel.OpenForEditAsync(folder);
+        else await viewModel.OpenRootAsync(folder);
+
+        if (_mainWindow.WindowState == WindowState.Minimized)
+            _mainWindow.WindowState = WindowState.Normal;
+        _mainWindow.Activate();
     }
 
     protected override async void OnExit(ExitEventArgs e)
@@ -55,6 +126,7 @@ public partial class App : Application
             await _host.StopAsync();
             _host.Dispose();
         }
+        _singleInstance?.Dispose();
         base.OnExit(e);
     }
 }

@@ -10,11 +10,13 @@ namespace Tagster.App;
 public partial class MainWindow : Window
 {
     private readonly MainViewModel _viewModel;
+    private readonly Func<SettingsWindow> _settingsWindowFactory;
 
-    public MainWindow(MainViewModel viewModel)
+    public MainWindow(MainViewModel viewModel, Func<SettingsWindow> settingsWindowFactory)
     {
         InitializeComponent();
         _viewModel = viewModel;
+        _settingsWindowFactory = settingsWindowFactory;
         DataContext = viewModel;
 
         viewModel.ScrollOffsetProvider = () => FindScrollViewer(FolderGrid)?.VerticalOffset ?? 0d;
@@ -54,6 +56,13 @@ public partial class MainWindow : Window
         };
         if (dialog.ShowDialog(this) == true)
             await _viewModel.SetCoverAsync(dialog.FileName);
+    }
+
+    private void OnSettingsClick(object sender, RoutedEventArgs e)
+    {
+        var window = _settingsWindowFactory();
+        window.Owner = this;
+        window.ShowDialog();
     }
 
     private async void OnTagClick(object sender, MouseButtonEventArgs e)

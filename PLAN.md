@@ -4,7 +4,7 @@ A simple, fast, local folder cataloguer for a photographers' archive: assign tag
 folders, search by include/exclude tags, browse Explorer-style with thumbnails, and set
 folder covers from inside the app. Windows 10 & 11, fully Unicode (Cyrillic + Latin).
 
-**Status:** M1–M4 complete (core, browser, tagging + search, folder covers); M5 (Explorer menu + installer) next.
+**Status:** M1–M5 complete (core, browser, tagging + search, covers, Explorer menu + settings + installer); M6 (polish) next.
 **Decisions locked:** 2026-06-19.
 
 ---
@@ -142,8 +142,8 @@ filtered by a normalized substring of the folder name. Example: `has {док} AN
       assign/remove, tag management (rename/merge/delete propagated to sidecars).
 - [x] **M4 — Covers:** set from inside-folder photo or external image; `.ico` + `desktop.ini`
       automation + refresh.
-- [ ] **M5 — Explorer menu & installer:** registry verbs, single-instance activation,
-      Inno Setup/MSI. Optional sparse package.
+- [x] **M5 — Explorer menu & installer:** registry verbs (HKCU, toggled from Settings),
+      single-instance activation, Inno Setup script. Optional sparse package (later).
 - [ ] **M6 — Polish:** perf pass at thousands of folders, backup/export, settings, logging.
 
 ---

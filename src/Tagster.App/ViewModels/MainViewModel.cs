@@ -73,8 +73,31 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>Raised after a load completes when a saved scroll offset should be restored.</summary>
     public event Action<double>? RestoreScrollRequested;
 
-    public Task InitializeAsync()
-        => NavigateToAsync(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+    /// <summary>Folder to open on launch (from a context-menu click or the remembered archive).</summary>
+    public string? StartupFolder { get; set; }
+
+    /// <summary>Whether the startup folder should open ready for tag editing.</summary>
+    public bool StartupEdit { get; set; }
+
+    public async Task InitializeAsync()
+    {
+        if (StartupFolder is not null && Directory.Exists(StartupFolder))
+        {
+            if (StartupEdit) await OpenForEditAsync(StartupFolder);
+            else await OpenRootAsync(StartupFolder);
+            return;
+        }
+        await NavigateToAsync(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+    }
+
+    /// <summary>Open a folder's parent as the archive root and select the folder for tag editing.</summary>
+    public async Task OpenForEditAsync(string folderPath)
+    {
+        var full = Path.GetFullPath(folderPath);
+        var parent = Directory.GetParent(full)?.FullName ?? full;
+        await OpenRootAsync(parent);
+        SelectedItem = Items.FirstOrDefault(i => string.Equals(i.FullPath, full, StringComparison.OrdinalIgnoreCase));
+    }
 
     // ---- navigation ----
 

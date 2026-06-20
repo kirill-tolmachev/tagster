@@ -76,6 +76,7 @@
                 <Button Content="↑" Width="36" Margin="0,0,8,0" ToolTip="Up" Command="{Binding GoUpCommand}" />
                 <Button Content="Open archive…" DockPanel.Dock="Right" Margin="4,0,0,0" Padding="10,0" Click="OnOpenFolderClick" />
                 <Button Content="Rescan" DockPanel.Dock="Right" Margin="8,0,0,0" Padding="10,0" Command="{Binding RescanCommand}" />
+                <Button Content="Settings" DockPanel.Dock="Right" Margin="8,0,0,0" Padding="10,0" Click="OnSettingsClick" />
                 <TextBox VerticalContentAlignment="Center" Padding="4,2"
                          Text="{Binding CurrentPath, Mode=OneWay}" KeyDown="OnAddressKeyDown" />
             </DockPanel>

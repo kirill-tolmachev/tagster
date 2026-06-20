@@ -1,0 +1,28 @@
+<Window x:Class="Tagster.App.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Tagster settings" Height="280" Width="480"
+        WindowStartupLocation="CenterOwner" ResizeMode="NoResize" ShowInTaskbar="False">
+    <DockPanel Margin="16">
+        <TextBlock DockPanel.Dock="Top" Text="Settings" FontSize="16" FontWeight="Bold" Margin="0,0,0,12" />
+
+        <Button DockPanel.Dock="Bottom" Content="Close" HorizontalAlignment="Right" Width="92" Padding="0,4"
+                IsCancel="True" Click="OnClose" />
+        <TextBlock DockPanel.Dock="Bottom" Text="{Binding StatusMessage}" Foreground="Gray"
+                   Margin="0,10,0,10" TextWrapping="Wrap" MinHeight="16" />
+
+        <StackPanel>
+            <TextBlock Text="Windows Explorer" FontWeight="SemiBold" Margin="0,0,0,4" />
+            <CheckBox Content="Show Tagster in the folder right-click menu"
+                      IsChecked="{Binding ExplorerMenuEnabled}" Margin="0,0,0,2" />
+            <TextBlock Text="Adds “Open in Tagster” and “Edit tags in Tagster” to folders."
+                       Foreground="Gray" Margin="20,0,0,12" TextWrapping="Wrap" />
+
+            <TextBlock Text="Startup" FontWeight="SemiBold" Margin="0,0,0,4" />
+            <CheckBox Content="Reopen the last archive when Tagster starts"
+                      IsChecked="{Binding ReopenLastArchive}" Margin="0,0,0,8" />
+            <TextBlock Text="Last archive:" Foreground="Gray" />
+            <TextBlock Text="{Binding LastArchivePath, TargetNullValue=(none)}" TextTrimming="CharacterEllipsis" />
+        </StackPanel>
+    </DockPanel>
+</Window>
