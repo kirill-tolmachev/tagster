@@ -28,20 +28,28 @@ public partial class MainWindow
 
     private async void OnItemDoubleClick(object sender, MouseButtonEventArgs e)
     {
-        if (sender is FrameworkElement { DataContext: FolderItemViewModel item })
+        if (sender is not FrameworkElement { DataContext: FolderItemViewModel item }) return;
+        if (item.IsFolder)
             await _viewModel.NavigateToAsync(item.FullPath);
+        else
+            LaunchPath(item.FullPath); // open a file in its default app, like Explorer
     }
 
     private void OnOpenSelectedClick(object sender, RoutedEventArgs e)
     {
-        if (_viewModel.SelectedItem is not { } item) return;
+        if (_viewModel.SelectedItem is { } item)
+            LaunchPath(item.FullPath);
+    }
+
+    private static void LaunchPath(string path)
+    {
         try
         {
-            Process.Start(new ProcessStartInfo(item.FullPath) { UseShellExecute = true });
+            Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
         }
         catch
         {
-            // ignore failures to launch Explorer
+            // ignore failures to launch Explorer / the default handler
         }
     }
 
@@ -106,10 +114,29 @@ public partial class MainWindow
             await _viewModel.RemoveTagAsync(tag);
     }
 
-    private void OnNewTagKeyDown(object sender, KeyEventArgs e)
+    private async void OnAddTagQuerySubmitted(
+        Wpf.Ui.Controls.AutoSuggestBox sender, Wpf.Ui.Controls.AutoSuggestBoxQuerySubmittedEventArgs args)
+        => await SubmitAddTagAsync(args.QueryText);
+
+    private async void OnAddTagClick(object sender, RoutedEventArgs e)
+        => await SubmitAddTagAsync(AddTagBox.Text);
+
+    /// <summary>
+    /// Commit the add-tag box: reuse an existing tag silently, but require an explicit confirm to
+    /// create a brand-new one — so a typo can't quietly become a near-duplicate tag.
+    /// </summary>
+    private async Task SubmitAddTagAsync(string? text)
     {
-        if (e.Key == Key.Enter && _viewModel.AddTagCommand.CanExecute(null))
-            _viewModel.AddTagCommand.Execute(null);
+        var value = (text ?? string.Empty).Trim();
+        if (value.Length == 0) return;
+
+        if (await _viewModel.TryAddExistingTagAsync(value)) return;
+
+        var choice = MessageBox.Show(this,
+            $"“{value}” isn’t an existing tag yet. Create it as a new tag?",
+            "New tag", MessageBoxButton.OKCancel, MessageBoxImage.Question);
+        if (choice == MessageBoxResult.OK)
+            await _viewModel.CreateTagAsync(value);
     }
 
     private async void OnSetCoverClick(object sender, RoutedEventArgs e)

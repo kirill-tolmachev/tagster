@@ -20,7 +20,7 @@ public class FolderBrowserTests
         var hidden = temp.CreateFolder("$protected");
         new DirectoryInfo(hidden).Attributes |= FileAttributes.Hidden | FileAttributes.System;
 
-        var result = browser.ListFolders(temp.Path);
+        var result = browser.ListEntries(temp.Path);
 
         Assert.Equal(new[] { "Petrov", "Иванов", "Сидоров" },
             result.Select(f => f.Name).OrderBy(n => n, StringComparer.Ordinal));
@@ -30,9 +30,57 @@ public class FolderBrowserTests
     }
 
     [Fact]
+    public void Lists_latin_folders_above_cyrillic()
+    {
+        using var temp = new TempDir();
+        var browser = new FolderBrowser(new SidecarStore());
+
+        temp.CreateFolder("Сидоров");
+        temp.CreateFolder("Иванов");
+        temp.CreateFolder("Smith");
+        temp.CreateFolder("Adams");
+
+        var result = browser.ListEntries(temp.Path);
+
+        Assert.Equal(new[] { "Adams", "Smith", "Иванов", "Сидоров" },
+            result.Select(f => f.Name).ToArray());
+    }
+
+    [Fact]
+    public void Lists_files_after_folders_and_hides_hidden_or_system()
+    {
+        using var temp = new TempDir();
+        var browser = new FolderBrowser(new SidecarStore());
+
+        temp.CreateFolder("Album");
+        File.WriteAllText(Path.Combine(temp.Path, "photo.jpg"), "x");
+        File.WriteAllText(Path.Combine(temp.Path, "notes.txt"), "x");
+
+        // Tagster's own artifacts must stay out of the listing: the sidecar is hidden-only,
+        // the cover files are hidden+system. Both kinds should be skipped.
+        WriteWithAttributes(temp, ".tagster", FileAttributes.Hidden);
+        WriteWithAttributes(temp, "desktop.ini", FileAttributes.Hidden | FileAttributes.System);
+
+        var result = browser.ListEntries(temp.Path);
+
+        // Folder first, then visible files in display order; artifacts omitted.
+        Assert.Equal(new[] { "Album", "notes.txt", "photo.jpg" }, result.Select(e => e.Name).ToArray());
+        Assert.False(result.Single(e => e.Name == "Album").IsFile);
+        Assert.True(result.Single(e => e.Name == "photo.jpg").IsFile);
+        Assert.True(result.Single(e => e.Name == "notes.txt").IsFile);
+    }
+
+    [Fact]
     public void Missing_directory_returns_empty()
     {
         var browser = new FolderBrowser(new SidecarStore());
-        Assert.Empty(browser.ListFolders(@"Z:\does\not\exist\tagster"));
+        Assert.Empty(browser.ListEntries(@"Z:\does\not\exist\tagster"));
+    }
+
+    private static void WriteWithAttributes(TempDir temp, string name, FileAttributes attributes)
+    {
+        var path = Path.Combine(temp.Path, name);
+        File.WriteAllText(path, "x");
+        File.SetAttributes(path, attributes);
     }
 }

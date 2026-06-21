@@ -37,6 +37,25 @@ public static class FolderQueryEngine
         }
     }
 
+    /// <summary>
+    /// Tally the tags carried by an already-matched set of folders: each normalized tag mapped to
+    /// how many of those folders carry it. This powers the tag panel's co-occurrence narrowing and
+    /// live counts — the keys are exactly the tags that can still combine with the current filter,
+    /// and the values are the per-tag folder counts shown beside them. A tag repeated within one
+    /// folder is counted once (folders, not occurrences).
+    /// </summary>
+    public static IReadOnlyDictionary<string, int> CoOccurringTagCounts(IEnumerable<TaggedFolder> folders)
+    {
+        var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var folder in folders)
+            foreach (var norm in folder.Tags
+                         .Select(TagNormalizer.Normalize)
+                         .Where(n => n.Length > 0)
+                         .Distinct(StringComparer.Ordinal))
+                counts[norm] = counts.GetValueOrDefault(norm) + 1;
+        return counts;
+    }
+
     private static HashSet<string> NormalizeSet(IEnumerable<string> tags)
     {
         var set = new HashSet<string>(StringComparer.Ordinal);

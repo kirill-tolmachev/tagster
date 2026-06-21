@@ -279,7 +279,7 @@
                 </StackPanel>
 
                 <TextBlock VerticalAlignment="Center" HorizontalAlignment="Center" Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                           Text="This folder has no sub-folders."
+                           Text="This folder is empty."
                            Visibility="{Binding ShowEmptyFolder, Converter={StaticResource BoolToVis}}" />
 
                 <ui:ProgressRing IsIndeterminate="True" Width="48" Height="48"
@@ -295,13 +295,13 @@
                                 Visibility="{Binding HasNoSelection, Converter={StaticResource BoolToVis}}">
                         <ui:SymbolIcon Symbol="Tag24" FontSize="32" HorizontalAlignment="Center"
                                        Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                        <TextBlock Text="Select a folder to see and edit its tags and cover."
+                        <TextBlock Text="Select a folder to edit its tags and cover, or a file to preview it."
                                    TextWrapping="Wrap" TextAlignment="Center" Margin="0,10,0,0"
                                    Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                     </StackPanel>
 
                     <!-- A folder is selected -->
-                    <DockPanel Visibility="{Binding HasSelection, Converter={StaticResource BoolToVis}}">
+                    <DockPanel Visibility="{Binding SelectedIsFolder, Converter={StaticResource BoolToVis}}">
                         <TextBlock DockPanel.Dock="Top" Text="{Binding SelectedItem.Name}" FontSize="16" FontWeight="SemiBold"
                                    TextTrimming="CharacterEllipsis" Margin="0,0,0,8" />
                         <Border DockPanel.Dock="Top" Height="200" CornerRadius="6" Margin="0,0,0,12"
@@ -326,9 +326,11 @@
                         <TextBlock DockPanel.Dock="Top" Text="Tags" FontWeight="SemiBold" Margin="0,0,0,6" />
                         <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
                             <ui:Button DockPanel.Dock="Right" Icon="{ui:SymbolIcon Add24}" Appearance="Primary" Margin="6,0,0,0"
-                                       ToolTip="Add tag" Command="{Binding AddTagCommand}" />
-                            <ui:TextBox PlaceholderText="Add a tag…" Text="{Binding NewTagText, UpdateSourceTrigger=PropertyChanged}"
-                                        KeyDown="OnNewTagKeyDown" />
+                                       ToolTip="Add tag" Click="OnAddTagClick" />
+                            <ui:AutoSuggestBox x:Name="AddTagBox" PlaceholderText="Add a tag…"
+                                               Text="{Binding NewTagText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                               OriginalItemsSource="{Binding AddTagSuggestions}"
+                                               QuerySubmitted="OnAddTagQuerySubmitted" />
                         </DockPanel>
                         <ItemsControl ItemsSource="{Binding SelectedItem.Tags}" VerticalAlignment="Top">
                             <ItemsControl.ItemsPanel>
@@ -350,6 +352,19 @@
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
                     </DockPanel>
+
+                    <!-- A file is selected: preview + open externally (files aren't tagged) -->
+                    <StackPanel Visibility="{Binding SelectedIsFile, Converter={StaticResource BoolToVis}}">
+                        <TextBlock Text="{Binding SelectedItem.Name}" FontSize="16" FontWeight="SemiBold"
+                                   TextTrimming="CharacterEllipsis" Margin="0,0,0,8" />
+                        <Border Height="200" CornerRadius="6" Margin="0,0,0,12"
+                                Background="{DynamicResource ControlFillColorSecondaryBrush}">
+                            <Image Source="{Binding SelectedItem.Thumbnail}" Stretch="Uniform" Margin="8"
+                                   RenderOptions.BitmapScalingMode="HighQuality" />
+                        </Border>
+                        <ui:Button Content="Open file" Icon="{ui:SymbolIcon Open24}" Appearance="Secondary"
+                                   HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Click="OnOpenSelectedClick" />
+                    </StackPanel>
                 </Grid>
             </ui:Card>
         </Grid>

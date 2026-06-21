@@ -14,7 +14,16 @@ public enum TagFilterState
 public sealed partial class TagFilterViewModel(string name, int count) : ObservableObject
 {
     public string Name { get; } = name;
-    public int Count { get; } = count;
+
+    /// <summary>Archive-wide folder count — the baseline shown when no filter is active.</summary>
+    public int GlobalCount { get; } = count;
+
+    /// <summary>
+    /// Folders carrying this tag in the current view: the archive-wide total normally, or — while a
+    /// filter is active — how many of the current results carry it (the faceted "live" count).
+    /// </summary>
+    [ObservableProperty]
+    private int _count = count;
 
     [ObservableProperty]
     private TagFilterState _state;

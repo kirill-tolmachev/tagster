@@ -57,6 +57,32 @@ public class FolderQueryEngineTests
         Assert.Equal(new[] { "Иванов" }, Names(q));
     }
 
+    [Fact]
+    public void CoOccurring_tags_are_those_carried_by_the_matches()
+    {
+        // Selecting "док" matches Иванов(док,война) and Петров(док,портрет): the tags available to
+        // combine next are exactly док/война/портрет. The Latin "doc" never co-occurs, so it drops.
+        var matches = FolderQueryEngine.Filter(Sample, new SearchQuery { Include = ["док"] });
+        var counts = FolderQueryEngine.CoOccurringTagCounts(matches);
+
+        Assert.Equal(new[] { "война", "док", "портрет" }, counts.Keys.OrderBy(k => k, StringComparer.Ordinal));
+        Assert.Equal(2, counts["док"]);
+        Assert.Equal(1, counts["война"]);
+        Assert.Equal(1, counts["портрет"]);
+        Assert.False(counts.ContainsKey("doc"));
+    }
+
+    [Fact]
+    public void CoOccurring_keys_are_normalized_and_counted_per_folder()
+    {
+        // Mixed case + a duplicate within one folder must still count that folder once.
+        var folders = new[] { Folder("A", "Док", "док"), Folder("B", "ДОК") };
+        var counts = FolderQueryEngine.CoOccurringTagCounts(folders);
+
+        Assert.Equal(new[] { "док" }, counts.Keys);
+        Assert.Equal(2, counts["док"]);
+    }
+
     private static IEnumerable<string> Names(SearchQuery q)
         => FolderQueryEngine.Filter(Sample, q).Select(f => f.Name).OrderBy(n => n, StringComparer.Ordinal);
 }

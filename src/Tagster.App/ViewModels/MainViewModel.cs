@@ -30,6 +30,13 @@ public sealed partial class MainViewModel : ObservableObject
 
     private CancellationTokenSource? _thumbnailCts;
 
+    /// <summary>
+    /// Normalized tags present in the current search results. Null when no filter is active (the
+    /// panel shows every tag); otherwise it narrows the tag list to those that co-occur with the
+    /// current selection, so you only ever see tags that can still combine.
+    /// </summary>
+    private HashSet<string>? _availableTagNorms;
+
     public MainViewModel(
         IFolderBrowser browser,
         IThumbnailService thumbnails,
@@ -57,6 +64,13 @@ public sealed partial class MainViewModel : ObservableObject
     public ObservableCollection<TagFilterViewModel> VisibleTags { get; } = [];
     public ObservableCollection<TagFilterViewModel> ActiveFilters { get; } = [];
 
+    /// <summary>
+    /// Add-tag autocomplete pool: archive tags not already on the selected folder, best-first. The
+    /// suggestion box filters this as the user types so they reuse an existing tag instead of
+    /// risking a mistyped duplicate. Empty unless a folder is selected.
+    /// </summary>
+    public ObservableCollection<string> AddTagSuggestions { get; } = [];
+
     [ObservableProperty] private string _currentPath = "";
     [ObservableProperty] private string? _rootPath;
     [ObservableProperty] private bool _isLoading;
@@ -72,6 +86,8 @@ public sealed partial class MainViewModel : ObservableObject
     public bool HasRoot => RootPath is not null;
     public bool HasSelection => SelectedItem is not null;
     public bool HasNoSelection => SelectedItem is null;
+    public bool SelectedIsFolder => SelectedItem is { IsFolder: true };
+    public bool SelectedIsFile => SelectedItem is { IsFile: true };
     public bool IsArchiveOpen => RootPath is not null;
     public bool HasActiveFilters => ActiveFilters.Count > 0;
     public bool ShowOpenArchivePrompt => RootPath is null && !IsLoading;
@@ -167,8 +183,16 @@ public sealed partial class MainViewModel : ObservableObject
         var query = TagNormalizer.Normalize(TagFilterText);
         VisibleTags.Clear();
         foreach (var tag in Tags)
-            if (query.Length == 0 || TagNormalizer.Normalize(tag.Name).Contains(query, StringComparison.Ordinal))
-                VisibleTags.Add(tag);
+        {
+            var norm = TagNormalizer.Normalize(tag.Name);
+            if (query.Length > 0 && !norm.Contains(query, StringComparison.Ordinal))
+                continue;
+            // Hide tags that don't co-occur with the current filter — but always keep active ones
+            // visible so they can still be toggled off.
+            if (_availableTagNorms is not null && tag.State == TagFilterState.None && !_availableTagNorms.Contains(norm))
+                continue;
+            VisibleTags.Add(tag);
+        }
     }
 
     public async Task ToggleTagAsync(TagFilterViewModel tag, bool exclude)
@@ -199,6 +223,7 @@ public sealed partial class MainViewModel : ObservableObject
     {
         foreach (var tag in Tags)
             tag.State = TagFilterState.None;
+        ClearTagNarrowing();
         UpdateActiveFilters();
     }
 
@@ -209,6 +234,7 @@ public sealed partial class MainViewModel : ObservableObject
 
         if (include.Count == 0 && exclude.Count == 0)
         {
+            ClearTagNarrowing();
             IsSearchMode = false;
             await LoadCurrentAsync(restoreScroll: false);
             return;
@@ -218,25 +244,73 @@ public sealed partial class MainViewModel : ObservableObject
         var query = new SearchQuery { Include = include, Exclude = exclude, IncludeMatch = TagMatch.All };
         var results = await _index.SearchAsync(query, RootPath);
         ReplaceItems(results
-            .OrderBy(r => r.Name, StringComparer.CurrentCultureIgnoreCase)
+            .OrderBy(r => r.Name, FolderNameComparer.Default)
             .Select(r => new FolderItemViewModel(r.Name, r.AbsolutePath, r.Tags)));
+        NarrowTagsTo(results);
         StatusText = $"{Items.Count} result{(Items.Count == 1 ? "" : "s")} · {include.Count} include / {exclude.Count} exclude";
+    }
+
+    /// <summary>
+    /// Restrict the tag panel to tags that co-occur with the current results and switch each tag's
+    /// shown count to how many of those results carry it (faceted live counts).
+    /// </summary>
+    private void NarrowTagsTo(IReadOnlyList<TaggedFolder> results)
+    {
+        var counts = FolderQueryEngine.CoOccurringTagCounts(results);
+        _availableTagNorms = [.. counts.Keys];
+        foreach (var tag in Tags)
+            tag.Count = counts.GetValueOrDefault(TagNormalizer.Normalize(tag.Name));
+        RefreshVisibleTags();
+    }
+
+    /// <summary>Drop the co-occurrence narrowing and restore archive-wide tag counts.</summary>
+    private void ClearTagNarrowing()
+    {
+        if (_availableTagNorms is null) return;
+        _availableTagNorms = null;
+        foreach (var tag in Tags)
+            tag.Count = tag.GlobalCount;
+        RefreshVisibleTags();
     }
 
     // ---- tag editing on the selected folder ----
 
-    [RelayCommand(CanExecute = nameof(HasSelection))]
-    private async Task AddTag()
+    /// <summary>
+    /// Add a typed tag only if it's already an existing tag (added in its canonical spelling).
+    /// Returns false when it isn't — the view then asks the user to confirm creating a new tag, so
+    /// a typo can't quietly mint a near-duplicate.
+    /// </summary>
+    public async Task<bool> TryAddExistingTagAsync(string text)
     {
-        if (SelectedItem is null) return;
-        var tag = NewTagText.Trim();
-        if (tag.Length == 0) return;
+        if (SelectedItem is not { IsFolder: true }) return false;
+        if (TagSuggester.ExactMatch(Tags.Select(t => t.Name), text) is not { } canonical) return false;
+        await AddTagValueAsync(canonical);
+        return true;
+    }
 
-        var root = ResolveRoot(SelectedItem.FullPath);
-        await _tagging.AddTagsAsync(root, SelectedItem.FullPath, [tag]);
+    /// <summary>Deliberately create and apply a brand-new tag (after the user confirms).</summary>
+    public Task CreateTagAsync(string text) => AddTagValueAsync(text);
+
+    private async Task AddTagValueAsync(string tag)
+    {
+        if (SelectedItem is not { IsFolder: true } folder) return;
+        var value = tag.Trim();
+        if (value.Length == 0) return;
+
+        var root = ResolveRoot(folder.FullPath);
+        await _tagging.AddTagsAsync(root, folder.FullPath, [value]);
         NewTagText = "";
-        SelectedItem.Tags = _tagging.GetTags(SelectedItem.FullPath);
+        folder.Tags = _tagging.GetTags(folder.FullPath);
         await AfterTagEditAsync();
+    }
+
+    /// <summary>Rebuild the add-tag autocomplete pool for the current selection.</summary>
+    private void RefreshAddTagSuggestions()
+    {
+        AddTagSuggestions.Clear();
+        if (SelectedItem is not { IsFolder: true } folder) return;
+        foreach (var name in TagSuggester.Available(Tags.Select(t => t.Name), folder.Tags))
+            AddTagSuggestions.Add(name);
     }
 
     public async Task RemoveTagAsync(string tag)
@@ -287,7 +361,7 @@ public sealed partial class MainViewModel : ObservableObject
         }
     }
 
-    [RelayCommand(CanExecute = nameof(HasSelection))]
+    [RelayCommand(CanExecute = nameof(SelectedIsFolder))]
     private async Task RemoveCover()
     {
         var item = SelectedItem;
@@ -374,6 +448,7 @@ public sealed partial class MainViewModel : ObservableObject
         }
         RefreshVisibleTags();
         UpdateActiveFilters();
+        RefreshAddTagSuggestions();
     }
 
     // ---- loading / thumbnails ----
@@ -389,9 +464,10 @@ public sealed partial class MainViewModel : ObservableObject
             CurrentPath = entry.Path;
             BuildBreadcrumbs(entry.Path);
 
-            var folders = await Task.Run(() => _browser.ListFolders(entry.Path));
-            ReplaceItems(folders.Select(f => new FolderItemViewModel(f)));
-            StatusText = Items.Count == 1 ? "1 folder" : $"{Items.Count} folders";
+            var entries = await Task.Run(() => _browser.ListEntries(entry.Path));
+            ReplaceItems(entries.Select(f => new FolderItemViewModel(f)));
+            var fileCount = Items.Count(i => i.IsFile);
+            StatusText = DescribeContents(Items.Count - fileCount, fileCount);
             NotifyNavigationState();
 
             if (restoreScroll)
@@ -401,6 +477,15 @@ public sealed partial class MainViewModel : ObservableObject
         {
             IsLoading = false;
         }
+    }
+
+    /// <summary>Explorer-style "N folders · M files" summary for the status bar.</summary>
+    private static string DescribeContents(int folders, int files)
+    {
+        var parts = new List<string>(2);
+        if (folders > 0) parts.Add($"{folders} folder{(folders == 1 ? "" : "s")}");
+        if (files > 0) parts.Add($"{files} file{(files == 1 ? "" : "s")}");
+        return parts.Count > 0 ? string.Join(" · ", parts) : "Empty folder";
     }
 
     private void ReplaceItems(IEnumerable<FolderItemViewModel> items)
@@ -509,7 +594,10 @@ public sealed partial class MainViewModel : ObservableObject
     {
         OnPropertyChanged(nameof(HasSelection));
         OnPropertyChanged(nameof(HasNoSelection));
-        AddTagCommand.NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(SelectedIsFolder));
+        OnPropertyChanged(nameof(SelectedIsFile));
         RemoveCoverCommand.NotifyCanExecuteChanged();
+        NewTagText = "";
+        RefreshAddTagSuggestions();
     }
 }
