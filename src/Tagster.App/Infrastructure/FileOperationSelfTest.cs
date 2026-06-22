@@ -28,13 +28,13 @@ internal static class FileOperationSelfTest
             File.WriteAllText(Path.Combine(src, "hello.txt"), "hi");
 
             // Move src into box.
-            if (!ops.Move([src], first, 0)) return (false, "FAIL: Move returned cancelled");
+            if (ops.Move([src], first, 0) != FileOpResult.Completed) return (false, "FAIL: Move returned cancelled");
             var movedFile = Path.Combine(first, "src", "hello.txt");
             if (Directory.Exists(src)) return (false, "FAIL: source still present after Move");
             if (!File.Exists(movedFile)) return (false, "FAIL: file missing after Move");
 
             // Copy box\src back out to the root.
-            if (!ops.Copy([Path.Combine(first, "src")], root, 0)) return (false, "FAIL: Copy returned cancelled");
+            if (ops.Copy([Path.Combine(first, "src")], root, 0) != FileOpResult.Completed) return (false, "FAIL: Copy returned cancelled");
             if (!File.Exists(Path.Combine(root, "src", "hello.txt"))) return (false, "FAIL: file missing after Copy");
             if (!File.Exists(movedFile)) return (false, "FAIL: original lost after Copy");
 
@@ -45,7 +45,7 @@ internal static class FileOperationSelfTest
             if (Directory.Exists(Path.Combine(root, "src"))) return (false, "FAIL: old name still present after Rename");
 
             // Delete everything to the Recycle Bin.
-            if (!ops.Delete([first, second, Path.Combine(root, "renamed")], 0)) return (false, "FAIL: Delete returned cancelled");
+            if (ops.Delete([first, second, Path.Combine(root, "renamed")], 0) != FileOpResult.Completed) return (false, "FAIL: Delete returned cancelled");
             if (Directory.Exists(first) || Directory.Exists(second) || Directory.Exists(Path.Combine(root, "renamed")))
                 return (false, "FAIL: items still present after Delete");
 

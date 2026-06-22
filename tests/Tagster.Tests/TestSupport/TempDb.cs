@@ -9,11 +9,15 @@ public sealed class TempDb : IDisposable
 
     public SqliteFolderIndex Index { get; }
 
+    /// <summary>Full path to the backing database file (for tests that seed it directly).</summary>
+    public string DatabasePath { get; }
+
     public TempDb()
     {
         _directory = Path.Combine(Path.GetTempPath(), "tagster-tests-db", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_directory);
-        Index = new SqliteFolderIndex(Path.Combine(_directory, "index.db"));
+        DatabasePath = Path.Combine(_directory, "index.db");
+        Index = new SqliteFolderIndex(DatabasePath);
     }
 
     public void Dispose()

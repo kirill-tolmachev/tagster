@@ -14,34 +14,35 @@ public sealed class FileOperationService(ILogger<FileOperationService>? logger =
     private const FileOpFlags TransferFlags = FileOpFlags.AllowUndo | FileOpFlags.NoConfirmMkDir | FileOpFlags.AddUndoRecord;
     private const FileOpFlags DeleteFlags = FileOpFlags.AllowUndo | FileOpFlags.RecycleOnDelete | FileOpFlags.AddUndoRecord;
 
-    public bool Copy(IReadOnlyList<string> sourcePaths, string destinationFolder, nint ownerWindow)
+    public FileOpResult Copy(IReadOnlyList<string> sourcePaths, string destinationFolder, nint ownerWindow)
         => Perform(ownerWindow, TransferFlags, (op, rcws) =>
         {
             var destination = Add(rcws, CreateShellItem(destinationFolder));
             return EnqueueEach(sourcePaths, rcws, item => op.CopyItem(item, destination, null, IntPtr.Zero));
         });
 
-    public bool Move(IReadOnlyList<string> sourcePaths, string destinationFolder, nint ownerWindow)
+    public FileOpResult Move(IReadOnlyList<string> sourcePaths, string destinationFolder, nint ownerWindow)
         => Perform(ownerWindow, TransferFlags, (op, rcws) =>
         {
             var destination = Add(rcws, CreateShellItem(destinationFolder));
             return EnqueueEach(sourcePaths, rcws, item => op.MoveItem(item, destination, null, IntPtr.Zero));
         });
 
-    public bool Delete(IReadOnlyList<string> paths, nint ownerWindow)
+    public FileOpResult Delete(IReadOnlyList<string> paths, nint ownerWindow)
         => Perform(ownerWindow, DeleteFlags, (op, rcws) =>
             EnqueueEach(paths, rcws, item => op.DeleteItem(item, IntPtr.Zero)));
 
     public string? Rename(string path, string newName, nint ownerWindow)
     {
-        var completed = Perform(ownerWindow, TransferFlags, (op, rcws) =>
+        var result = Perform(ownerWindow, TransferFlags, (op, rcws) =>
         {
             var item = Add(rcws, CreateShellItem(path));
             Check(op.RenameItem(item, newName, IntPtr.Zero));
             return true;
         });
 
-        if (!completed) return null;
+        // A single rename either happens or it doesn't; anything short of completion means no change.
+        if (result != FileOpResult.Completed) return null;
         var parent = Path.GetDirectoryName(path);
         return parent is null ? newName : Path.Combine(parent, newName);
     }
@@ -64,11 +65,12 @@ public sealed class FileOperationService(ILogger<FileOperationService>? logger =
     }
 
     /// <summary>
-    /// Build a single shell operation batch, perform it, and report whether it ran to completion.
-    /// <paramref name="build"/> enqueues the per-item calls and returns false when there's nothing to
-    /// do. Every COM object created along the way is released in LIFO order afterwards.
+    /// Build a single shell operation batch, perform it, and report how far it got (see
+    /// <see cref="FileOpResult"/>). <paramref name="build"/> enqueues the per-item calls and returns
+    /// false when there's nothing to do. Every COM object created along the way is released in LIFO
+    /// order afterwards.
     /// </summary>
-    private bool Perform(nint ownerWindow, FileOpFlags flags, Func<IFileOperation, List<object>, bool> build)
+    private FileOpResult Perform(nint ownerWindow, FileOpFlags flags, Func<IFileOperation, List<object>, bool> build)
     {
         var op = CreateFileOperation();
         var rcws = new List<object> { op };
@@ -77,14 +79,17 @@ public sealed class FileOperationService(ILogger<FileOperationService>? logger =
             Check(op.SetOperationFlags((uint)flags));
             if (ownerWindow != 0) op.SetOwnerWindow(ownerWindow);
 
-            if (!build(op, rcws)) return false; // nothing queued
+            if (!build(op, rcws)) return FileOpResult.NothingDone; // nothing queued
 
             var hr = op.PerformOperations();
-            if (hr == ErrorCancelled) return false;
+            // A cancel/abort does NOT mean the disk is untouched: the shell processes a batch item by
+            // item, so earlier items may already be moved/copied/recycled. Report Partial so callers
+            // still reconcile their index instead of assuming nothing happened.
+            if (hr == ErrorCancelled) return FileOpResult.Partial;
             Check(hr);
 
             op.GetAnyOperationsAborted(out var aborted);
-            return !aborted;
+            return aborted ? FileOpResult.Partial : FileOpResult.Completed;
         }
         finally
         {

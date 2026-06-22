@@ -504,10 +504,10 @@ public sealed partial class MainViewModel : ObservableObject
         if (paths.Count == 0) return;
         var touchedFolder = _selection.Any(i => i.IsFolder);
 
-        bool completed;
+        FileOpResult result;
         try
         {
-            completed = _fileOps.Delete(paths, OwnerWindow);
+            result = _fileOps.Delete(paths, OwnerWindow);
         }
         catch (Exception ex)
         {
@@ -515,10 +515,13 @@ public sealed partial class MainViewModel : ObservableObject
             StatusText = $"Couldn't delete: {ex.Message}";
             return;
         }
-        if (!completed) return; // cancelled
+        if (result == FileOpResult.NothingDone) return; // nothing recycled
 
+        // A partly-finished delete may still have recycled some items, so reconcile regardless.
         await AfterStructuralChangeAsync(mayAffectIndex: touchedFolder);
-        StatusText = $"{paths.Count} item{(paths.Count == 1 ? "" : "s")} deleted";
+        StatusText = result == FileOpResult.Completed
+            ? $"{paths.Count} item{(paths.Count == 1 ? "" : "s")} deleted"
+            : "Delete didn't finish — view refreshed";
     }
 
     /// <summary>Create a folder in the current directory, select it, and return it for inline renaming.</summary>
@@ -584,10 +587,10 @@ public sealed partial class MainViewModel : ObservableObject
         // Determined before the op: a move erases the source paths, so we can't probe them afterwards.
         var touchedFolder = paths.Any(Directory.Exists);
 
-        bool completed;
+        FileOpResult result;
         try
         {
-            completed = isMove
+            result = isMove
                 ? _fileOps.Move(paths, CurrentPath, OwnerWindow)
                 : _fileOps.Copy(paths, CurrentPath, OwnerWindow);
         }
@@ -597,7 +600,7 @@ public sealed partial class MainViewModel : ObservableObject
             StatusText = $"Couldn't paste: {ex.Message}";
             return;
         }
-        if (!completed) return; // cancelled
+        if (result == FileOpResult.NothingDone) return; // nothing pasted
 
         if (isMove)
         {
@@ -605,8 +608,11 @@ public sealed partial class MainViewModel : ObservableObject
             MarkCut(null);
         }
 
+        // A partial paste still moved/copied some items, so reconcile even when it didn't fully finish.
         await AfterStructuralChangeAsync(mayAffectIndex: touchedFolder);
-        StatusText = $"{paths.Count} item{(paths.Count == 1 ? "" : "s")} pasted";
+        StatusText = result == FileOpResult.Completed
+            ? $"{paths.Count} item{(paths.Count == 1 ? "" : "s")} pasted"
+            : "Paste didn't finish — view refreshed";
     }
 
     /// <summary>
@@ -622,10 +628,10 @@ public sealed partial class MainViewModel : ObservableObject
         if (valid.Count == 0) return;
 
         var touchedFolder = valid.Any(Directory.Exists);
-        bool completed;
+        FileOpResult result;
         try
         {
-            completed = copy
+            result = copy
                 ? _fileOps.Copy(valid, destinationFolder, OwnerWindow)
                 : _fileOps.Move(valid, destinationFolder, OwnerWindow);
         }
@@ -635,10 +641,13 @@ public sealed partial class MainViewModel : ObservableObject
             StatusText = $"Couldn't {(copy ? "copy" : "move")}: {ex.Message}";
             return;
         }
-        if (!completed) return; // cancelled
+        if (result == FileOpResult.NothingDone) return; // nothing dropped
 
+        // A partial drop still moved/copied some items, so reconcile even when it didn't fully finish.
         await AfterStructuralChangeAsync(mayAffectIndex: touchedFolder);
-        StatusText = $"{valid.Count} item{(valid.Count == 1 ? "" : "s")} {(copy ? "copied" : "moved")}";
+        StatusText = result == FileOpResult.Completed
+            ? $"{valid.Count} item{(valid.Count == 1 ? "" : "s")} {(copy ? "copied" : "moved")}"
+            : $"{(copy ? "Copy" : "Move")} didn't finish — view refreshed";
     }
 
     private static bool IsValidDrop(string source, string destination, bool copy)

@@ -1,3 +1,4 @@
+using Microsoft.Data.Sqlite;
 using Tagster.Core;
 
 namespace Tagster.Tests;
@@ -146,5 +147,63 @@ public class SqliteFolderIndexTests
 
         Assert.Equal(1, (await db.Index.GetTagCountsAsync(@"C:\archive")).Single(c => c.Name == "док").Count);
         Assert.Equal(2, (await db.Index.SearchAsync(new SearchQuery { Include = ["док"] })).Count);
+    }
+
+    [Fact]
+    public async Task Search_and_get_all_exceed_sqlite_parameter_limit()
+    {
+        using var db = new TempDb();
+
+        // More folders than SQLITE_MAX_VARIABLE_NUMBER (32766): tag hydration must not bind one host
+        // parameter per matched id, or both SearchAsync and GetAllAsync (used by Rescan) would throw
+        // "too many SQL variables" on a large archive.
+        const int count = 35_000;
+        BulkSeed(db.DatabasePath, count, sharedTag: "bulk");
+
+        Assert.Equal(count, (await db.Index.GetAllAsync(@"C:\archive")).Count);
+        Assert.Equal(count, (await db.Index.SearchAsync(new SearchQuery())).Count);
+
+        var byTag = await db.Index.SearchAsync(new SearchQuery { Include = ["bulk"] });
+        Assert.Equal(count, byTag.Count);
+        Assert.All(byTag, f => Assert.Equal(new[] { "bulk" }, f.Tags));
+    }
+
+    /// <summary>
+    /// Insert <paramref name="count"/> folders (each carrying <paramref name="sharedTag"/>) straight
+    /// into the database file in a single transaction — far faster than per-folder UpsertAsync when we
+    /// need tens of thousands of rows.
+    /// </summary>
+    private static void BulkSeed(string databasePath, int count, string sharedTag)
+    {
+        using var connection = new SqliteConnection($"Data Source={databasePath}");
+        connection.Open();
+        using var transaction = connection.BeginTransaction();
+
+        using var folderCmd = connection.CreateCommand();
+        folderCmd.Transaction = transaction;
+        folderCmd.CommandText =
+            "INSERT INTO folders (id, root_path, relative_path, name, name_norm, updated_utc) " +
+            "VALUES ($id, 'C:\\archive', $name, $name, $name, '1970-01-01T00:00:00.0000000+00:00');";
+        var id = folderCmd.CreateParameter(); id.ParameterName = "$id"; folderCmd.Parameters.Add(id);
+        var name = folderCmd.CreateParameter(); name.ParameterName = "$name"; folderCmd.Parameters.Add(name);
+
+        using var tagCmd = connection.CreateCommand();
+        tagCmd.Transaction = transaction;
+        tagCmd.CommandText = "INSERT INTO folder_tags (folder_id, tag, tag_norm) VALUES ($fid, $tag, $tag);";
+        var fid = tagCmd.CreateParameter(); fid.ParameterName = "$fid"; tagCmd.Parameters.Add(fid);
+        var tag = tagCmd.CreateParameter(); tag.ParameterName = "$tag"; tag.Value = sharedTag; tagCmd.Parameters.Add(tag);
+
+        for (var i = 0; i < count; i++)
+        {
+            var guid = Guid.NewGuid().ToString();
+            id.Value = guid;
+            name.Value = "f" + i;
+            folderCmd.ExecuteNonQuery();
+
+            fid.Value = guid;
+            tagCmd.ExecuteNonQuery();
+        }
+
+        transaction.Commit();
     }
 }

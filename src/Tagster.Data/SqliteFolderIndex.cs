@@ -211,14 +211,22 @@ public sealed class SqliteFolderIndex : IFolderIndex, IDisposable
     private static async Task<IReadOnlyList<TaggedFolder>> QueryFoldersAsync(
         SqliteConnection connection, string folderSql, object? parameters, CancellationToken cancellationToken)
     {
+        // The caller's folder query may carry a trailing ';'; strip it so the same predicate can also
+        // be embedded as a subquery for tag hydration below.
+        var folderSelect = folderSql.TrimEnd().TrimEnd(';');
+
         var folderRows = (await connection.QueryAsync<FolderRow>(
-            new CommandDefinition(folderSql, parameters, cancellationToken: cancellationToken))).ToList();
+            new CommandDefinition(folderSelect, parameters, cancellationToken: cancellationToken))).ToList();
         if (folderRows.Count == 0) return [];
 
-        var ids = folderRows.Select(f => f.Id).ToList();
+        // Hydrate tags by JOINing folder_tags onto the SAME folder predicate instead of binding one
+        // host parameter per matched id. An `IN @Ids` list expands to one parameter each and overflows
+        // SQLite's SQLITE_MAX_VARIABLE_NUMBER cap (32766) once the result set is large enough — which
+        // would otherwise crash both SearchAsync and the GetAllAsync that every Rescan relies on.
         var tagRows = await connection.QueryAsync<TagRow>(new CommandDefinition(
-            "SELECT folder_id AS FolderId, tag AS Tag FROM folder_tags WHERE folder_id IN @Ids;",
-            new { Ids = ids }, cancellationToken: cancellationToken));
+            $"SELECT ft.folder_id AS FolderId, ft.tag AS Tag FROM folder_tags ft "
+            + $"WHERE ft.folder_id IN (SELECT m.Id FROM ({folderSelect}) m);",
+            parameters, cancellationToken: cancellationToken));
 
         var tagsByFolder = tagRows
             .GroupBy(t => t.FolderId, StringComparer.Ordinal)
