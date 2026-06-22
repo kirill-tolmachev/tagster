@@ -30,7 +30,10 @@ public sealed class SidecarStore(ILogger<SidecarStore>? logger = null) : ISideca
         try
         {
             using var stream = File.OpenRead(path);
-            return JsonSerializer.Deserialize<Sidecar>(stream, JsonOptions);
+            var sidecar = JsonSerializer.Deserialize<Sidecar>(stream, JsonOptions);
+            // A "tags": null in the JSON overwrites the [] initializer, leaving Tags null and
+            // NRE-ing every downstream consumer. Coalesce here so all readers are protected.
+            return sidecar is null ? null : sidecar with { Tags = sidecar.Tags ?? [] };
         }
         catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
         {

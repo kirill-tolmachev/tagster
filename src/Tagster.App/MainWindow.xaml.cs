@@ -101,7 +101,7 @@ public partial class MainWindow
         if (sender is FrameworkElement { DataContext: TagFilterViewModel tag })
         {
             var confirm = MessageBox.Show(this,
-                $"Remove the tag “{tag.Name}” from all {tag.Count} folder(s)?",
+                $"Remove the tag “{tag.Name}” from all {tag.GlobalCount} folder(s)?",
                 "Delete tag", MessageBoxButton.OKCancel, MessageBoxImage.Warning);
             if (confirm == MessageBoxResult.OK)
                 await _viewModel.DeleteTagAsync(tag);

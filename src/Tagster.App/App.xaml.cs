@@ -149,11 +149,12 @@ public partial class App : Application
         if (_host is null || _mainWindow is null) return;
 
         var (folder, edit) = CommandLine.Parse(args);
-        if (folder is null) return;
-
-        var viewModel = _host.Services.GetRequiredService<MainViewModel>();
-        if (edit) await viewModel.OpenForEditAsync(folder);
-        else await viewModel.OpenRootAsync(folder);
+        if (folder is not null)
+        {
+            var viewModel = _host.Services.GetRequiredService<MainViewModel>();
+            if (edit) await viewModel.OpenForEditAsync(folder);
+            else await viewModel.OpenRootAsync(folder);
+        }
 
         if (_mainWindow.WindowState == WindowState.Minimized)
             _mainWindow.WindowState = WindowState.Normal;

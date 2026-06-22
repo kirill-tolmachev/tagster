@@ -31,6 +31,15 @@ public sealed partial class MainViewModel : ObservableObject
     private CancellationTokenSource? _thumbnailCts;
 
     /// <summary>
+    /// Monotonic guard shared by the two view-producing async ops (<see cref="LoadCurrentAsync"/>
+    /// and <see cref="ApplyFiltersAsync"/>). Each increments it before its await; any operation that
+    /// finds the counter has moved on by the time it resumes is stale and bails out, so a slower
+    /// earlier call can't overwrite the grid for a path/filter that's no longer active. UI-thread
+    /// only, so a plain int is safe.
+    /// </summary>
+    private int _viewGeneration;
+
+    /// <summary>
     /// Normalized tags present in the current search results. Null when no filter is active (the
     /// panel shows every tag); otherwise it narrows the tag list to those that co-occur with the
     /// current selection, so you only ever see tags that can still combine.
@@ -242,7 +251,10 @@ public sealed partial class MainViewModel : ObservableObject
 
         IsSearchMode = true;
         var query = new SearchQuery { Include = include, Exclude = exclude, IncludeMatch = TagMatch.All };
+        var gen = ++_viewGeneration;
         var results = await _index.SearchAsync(query, RootPath);
+        if (gen != _viewGeneration) return;   // superseded by a newer navigation/search
+        IsLoading = false;   // release the spinner if this search superseded an in-flight navigation
         ReplaceItems(results
             .OrderBy(r => r.Name, FolderNameComparer.Default)
             .Select(r => new FolderItemViewModel(r.Name, r.AbsolutePath, r.Tags)));
@@ -437,12 +449,12 @@ public sealed partial class MainViewModel : ObservableObject
     private async Task RefreshTagsAsync()
     {
         var counts = await _index.GetTagCountsAsync(RootPath);
-        var previous = Tags.ToDictionary(t => t.Name, t => t.State, StringComparer.Ordinal);
+        var previous = Tags.ToDictionary(t => TagNormalizer.Normalize(t.Name), t => t.State, StringComparer.Ordinal);
         Tags.Clear();
         foreach (var count in counts)
         {
             var tag = new TagFilterViewModel(count.Name, count.Count);
-            if (previous.TryGetValue(count.Name, out var state))
+            if (previous.TryGetValue(TagNormalizer.Normalize(count.Name), out var state))
                 tag.State = state;
             Tags.Add(tag);
         }
@@ -458,6 +470,7 @@ public sealed partial class MainViewModel : ObservableObject
         var entry = _history.Current;
         if (entry is null) return;
 
+        var gen = ++_viewGeneration;
         IsLoading = true;
         try
         {
@@ -465,6 +478,7 @@ public sealed partial class MainViewModel : ObservableObject
             BuildBreadcrumbs(entry.Path);
 
             var entries = await Task.Run(() => _browser.ListEntries(entry.Path));
+            if (gen != _viewGeneration) return;   // superseded by a newer navigation/search
             ReplaceItems(entries.Select(f => new FolderItemViewModel(f)));
             var fileCount = Items.Count(i => i.IsFile);
             StatusText = DescribeContents(Items.Count - fileCount, fileCount);
@@ -475,7 +489,7 @@ public sealed partial class MainViewModel : ObservableObject
         }
         finally
         {
-            IsLoading = false;
+            if (gen == _viewGeneration) IsLoading = false;
         }
     }
 

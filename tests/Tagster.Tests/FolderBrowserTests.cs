@@ -77,6 +77,34 @@ public class FolderBrowserTests
         Assert.Empty(browser.ListEntries(@"Z:\does\not\exist\tagster"));
     }
 
+    [Fact]
+    public void Skips_reserved_device_name_entry_instead_of_aborting_the_listing()
+    {
+        using var temp = new TempDir();
+        var browser = new FolderBrowser(new SidecarStore());
+
+        temp.CreateFolder("Album");
+        File.WriteAllText(Path.Combine(temp.Path, "photo.jpg"), "x");
+
+        // A reserved DOS device name ("nul") survives EnumerateFiles but throws IOException the moment
+        // its .Attributes are read — which used to bubble up and abort the whole listing, so the folder
+        // "showed nothing". Only the \\?\ extended-length path can create such an entry.
+        var nul = @"\\?\" + Path.Combine(temp.Path, "nul");
+        using (File.Create(nul)) { }
+        try
+        {
+            var result = browser.ListEntries(temp.Path);
+
+            // The bad entry is skipped; the real folder and file still list.
+            Assert.Equal(new[] { "Album", "photo.jpg" }, result.Select(e => e.Name).ToArray());
+        }
+        finally
+        {
+            // Delete via \\?\ before TempDir cleanup, which can't remove it through a normal path.
+            File.Delete(nul);
+        }
+    }
+
     private static void WriteWithAttributes(TempDir temp, string name, FileAttributes attributes)
     {
         var path = Path.Combine(temp.Path, name);
