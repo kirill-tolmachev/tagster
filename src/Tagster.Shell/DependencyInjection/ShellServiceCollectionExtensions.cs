@@ -11,6 +11,7 @@ public static class ShellServiceCollectionExtensions
         services.TryAddSingleton<IThumbnailService, ShellThumbnailService>();
         services.TryAddSingleton<IFolderCoverService, FolderCoverService>();
         services.TryAddSingleton<IExplorerIntegration, ExplorerIntegrationService>();
+        services.TryAddSingleton<IFileOperationService, FileOperationService>();
         return services;
     }
 }

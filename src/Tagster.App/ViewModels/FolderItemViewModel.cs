@@ -17,6 +17,9 @@ public sealed partial class FolderItemViewModel : ObservableObject
     [ObservableProperty] private ImageSource? _thumbnail;
     [ObservableProperty] private IReadOnlyList<string> _tags;
 
+    /// <summary>True while this tile is on the clipboard as a cut — the grid dims it, like Explorer.</summary>
+    [ObservableProperty] private bool _isCut;
+
     public FolderItemViewModel(string name, string fullPath, IReadOnlyList<string> tags, bool isFile = false)
     {
         Name = name;

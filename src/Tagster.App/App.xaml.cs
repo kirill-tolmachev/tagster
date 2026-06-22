@@ -28,6 +28,7 @@ public partial class App : Application
         _diagnosticMode = e.Args.Contains("--selftest")
             || e.Args.Contains("--cover-test")
             || e.Args.Contains("--integration-test")
+            || e.Args.Contains("--fileop-test")
             || e.Args.Contains("--make-icon")
             || e.Args.Contains("--unregister")
             || e.Args.Contains("--log-test");
@@ -74,6 +75,14 @@ public partial class App : Application
         if (e.Args.Contains("--integration-test"))
         {
             var report = IntegrationSelfTest.Run(_host.Services.GetRequiredService<IExplorerIntegration>());
+            Console.WriteLine(report.Message);
+            _ = Dispatcher.BeginInvoke(new Action(() => Shutdown(report.Ok ? 0 : 1)), DispatcherPriority.ApplicationIdle);
+            return;
+        }
+
+        if (e.Args.Contains("--fileop-test"))
+        {
+            var report = FileOperationSelfTest.Run(_host.Services.GetRequiredService<IFileOperationService>());
             Console.WriteLine(report.Message);
             _ = Dispatcher.BeginInvoke(new Action(() => Shutdown(report.Ok ? 0 : 1)), DispatcherPriority.ApplicationIdle);
             return;

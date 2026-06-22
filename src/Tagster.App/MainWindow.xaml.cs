@@ -2,9 +2,11 @@ using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
 using Microsoft.Win32;
+using Tagster.Core;
 
 namespace Tagster.App;
 
@@ -21,6 +23,7 @@ public partial class MainWindow
         DataContext = viewModel;
 
         viewModel.ScrollOffsetProvider = () => FindScrollViewer(FolderGrid)?.VerticalOffset ?? 0d;
+        viewModel.OwnerWindowProvider = () => new WindowInteropHelper(this).Handle;
         viewModel.RestoreScrollRequested += OnRestoreScroll;
 
         Loaded += async (_, _) => await _viewModel.InitializeAsync();
@@ -34,6 +37,187 @@ public partial class MainWindow
         else
             LaunchPath(item.FullPath); // open a file in its default app, like Explorer
     }
+
+    /// <summary>Push the grid's multi-selection into the VM (ListBox.SelectedItems isn't bindable).</summary>
+    private void OnGridSelectionChanged(object sender, SelectionChangedEventArgs e)
+        => _viewModel.UpdateSelection(FolderGrid.SelectedItems.Cast<FolderItemViewModel>());
+
+    /// <summary>Right-clicking an unselected tile selects just it, so context actions target it;
+    /// right-clicking within an existing multi-selection leaves the set intact (like Explorer).</summary>
+    private void OnItemRightButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is ListBoxItem { IsSelected: false } container)
+        {
+            FolderGrid.SelectedItems.Clear();
+            container.IsSelected = true;
+        }
+    }
+
+    private async void OnGridKeyDown(object sender, KeyEventArgs e)
+    {
+        var ctrl = (Keyboard.Modifiers & ModifierKeys.Control) != 0;
+        var shift = (Keyboard.Modifiers & ModifierKeys.Shift) != 0;
+        switch (e.Key)
+        {
+            case Key.F2:
+                e.Handled = true;
+                await RenameSelectedAsync();
+                break;
+            case Key.Delete:
+                e.Handled = true;
+                await DeleteSelectedAsync();
+                break;
+            case Key.C when ctrl:
+                e.Handled = true;
+                _viewModel.CopySelection();
+                break;
+            case Key.X when ctrl:
+                e.Handled = true;
+                _viewModel.CutSelection();
+                break;
+            case Key.V when ctrl:
+                e.Handled = true;
+                await _viewModel.PasteAsync();
+                break;
+            case Key.N when ctrl && shift:
+                e.Handled = true;
+                await NewFolderFlowAsync();
+                break;
+        }
+    }
+
+    private void OnCutClick(object sender, RoutedEventArgs e) => _viewModel.CutSelection();
+
+    private void OnCopyClick(object sender, RoutedEventArgs e) => _viewModel.CopySelection();
+
+    private async void OnPasteClick(object sender, RoutedEventArgs e) => await _viewModel.PasteAsync();
+
+    private async void OnOpenItemClick(object sender, RoutedEventArgs e)
+    {
+        if (_viewModel.SelectedItem is not { } item) return;
+        if (item.IsFolder) await _viewModel.NavigateToAsync(item.FullPath);
+        else LaunchPath(item.FullPath);
+    }
+
+    private void OnOpenInExplorerClick(object sender, RoutedEventArgs e)
+    {
+        if (_viewModel.SelectedItem is { IsFolder: true } folder)
+            LaunchPath(folder.FullPath);
+    }
+
+    private void OnOpenParentFolderClick(object sender, RoutedEventArgs e)
+    {
+        if (_viewModel.SelectedItem is { IsFile: true } file)
+            ShowInExplorer(file.FullPath);
+    }
+
+    private async void OnRenameSelectedClick(object sender, RoutedEventArgs e) => await RenameSelectedAsync();
+
+    private async void OnDeleteSelectedClick(object sender, RoutedEventArgs e) => await DeleteSelectedAsync();
+
+    private async void OnNewFolderClick(object sender, RoutedEventArgs e) => await NewFolderFlowAsync();
+
+    private async Task RenameSelectedAsync()
+    {
+        if (!_viewModel.CanRenameSelection || _viewModel.SelectedItem is not { } item) return;
+        var newName = PromptForText(this, "Rename", "New name:", item.Name);
+        if (!string.IsNullOrWhiteSpace(newName))
+            await _viewModel.RenameAsync(item, newName);
+    }
+
+    private async Task DeleteSelectedAsync()
+    {
+        var count = _viewModel.SelectionCount;
+        if (count == 0) return;
+        var message = count == 1
+            ? $"Send “{_viewModel.SelectedItem?.Name}” to the Recycle Bin?"
+            : $"Send {count} items to the Recycle Bin?";
+        if (MessageBox.Show(this, message, "Delete", MessageBoxButton.OKCancel, MessageBoxImage.Warning) == MessageBoxResult.OK)
+            await _viewModel.DeleteSelectionAsync();
+    }
+
+    private async Task NewFolderFlowAsync()
+    {
+        var created = await _viewModel.NewFolderAsync();
+        if (created is null) return;
+        var newName = PromptForText(this, "New folder", "Folder name:", created.Name);
+        if (!string.IsNullOrWhiteSpace(newName) && newName.Trim() != created.Name)
+            await _viewModel.RenameAsync(created, newName);
+    }
+
+    // ---- drag and drop ----
+
+    private Point _dragStart;
+    private bool _maybeDragging;
+    private FolderItemViewModel[] _dragSnapshot = [];
+    private FolderItemViewModel? _pressedItem;
+
+    private void OnGridPreviewLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        _pressedItem = ItemDataUnder(e.OriginalSource as DependencyObject);
+        _maybeDragging = _pressedItem is not null; // only a press that lands on a tile can begin a drag
+        _dragStart = e.GetPosition(null);
+        _dragSnapshot = _viewModel.Selection.ToArray(); // snapshot before this click mutates the selection
+    }
+
+    private void OnGridPreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (!_maybeDragging || e.LeftButton != MouseButtonState.Pressed) return;
+
+        var pos = e.GetPosition(null);
+        if (Math.Abs(pos.X - _dragStart.X) < SystemParameters.MinimumHorizontalDragDistance &&
+            Math.Abs(pos.Y - _dragStart.Y) < SystemParameters.MinimumVerticalDragDistance)
+            return;
+
+        _maybeDragging = false;
+
+        // Dragging one tile of an existing multi-selection drags the whole set; otherwise just that tile.
+        var set = _pressedItem is not null && _dragSnapshot.Length > 1 && _dragSnapshot.Contains(_pressedItem)
+            ? _dragSnapshot
+            : _viewModel.Selection;
+        var paths = set.Select(i => i.FullPath).ToArray();
+        if (paths.Length == 0) return;
+
+        try
+        {
+            DragDrop.DoDragDrop(FolderGrid, new DataObject(DataFormats.FileDrop, paths),
+                DragDropEffects.Copy | DragDropEffects.Move);
+        }
+        catch (Exception)
+        {
+            // A cancelled/failed drag must not bring the app down.
+        }
+    }
+
+    private void OnGridDragOver(object sender, DragEventArgs e)
+    {
+        e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop) ? EffectFor(e) : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private async void OnGridDrop(object sender, DragEventArgs e)
+    {
+        if (e.Data.GetData(DataFormats.FileDrop) is not string[] paths || paths.Length == 0) return;
+        var destination = FolderPathUnder(e.OriginalSource as DependencyObject) ?? _viewModel.CurrentPath;
+        await _viewModel.DropAsync(paths, destination, copy: EffectFor(e) == DragDropEffects.Copy);
+    }
+
+    /// <summary>Default to move; hold Ctrl to copy — matching Explorer's drag semantics.</summary>
+    private static DragDropEffects EffectFor(DragEventArgs e)
+        => (e.KeyStates & DragDropKeyStates.ControlKey) != 0 ? DragDropEffects.Copy : DragDropEffects.Move;
+
+    /// <summary>Walk up from a hit-tested element to the FolderItemViewModel of the tile under it, if any.</summary>
+    private static FolderItemViewModel? ItemDataUnder(DependencyObject? source)
+    {
+        for (var node = source; node is Visual; node = VisualTreeHelper.GetParent(node))
+            if (node is ListBoxItem { DataContext: FolderItemViewModel item })
+                return item;
+        return null;
+    }
+
+    /// <summary>Drop target: a folder tile receives into itself; a file tile (or empty space) does not.</summary>
+    private static string? FolderPathUnder(DependencyObject? source)
+        => ItemDataUnder(source) is { IsFolder: true } folder ? folder.FullPath : null;
 
     private void OnOpenSelectedClick(object sender, RoutedEventArgs e)
     {
@@ -50,6 +234,24 @@ public partial class MainWindow
         catch
         {
             // ignore failures to launch Explorer / the default handler
+        }
+    }
+
+    /// <summary>Open a file's containing folder in Explorer with the file selected ("show in folder").</summary>
+    private static void ShowInExplorer(string path)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "explorer.exe",
+                Arguments = $"/select,\"{path}\"",
+                UseShellExecute = true,
+            });
+        }
+        catch
+        {
+            // ignore failures to launch Explorer
         }
     }
 
@@ -112,6 +314,24 @@ public partial class MainWindow
     {
         if (sender is FrameworkElement { DataContext: string tag })
             await _viewModel.RemoveTagAsync(tag);
+    }
+
+    /// <summary>
+    /// Layout-tolerant autocomplete: take over the AutoSuggestBox's built-in filtering so a query
+    /// typed in the wrong keyboard layout still surfaces the existing tag (typing "ktc" shows «лес»).
+    /// Marking the event handled suppresses the control's default <c>Contains</c> filter; we replace
+    /// it with <see cref="KeyboardLayout.MatchesEitherLayout"/>, which also matches the as-typed text.
+    /// Only user typing is intercepted — programmatic resets and suggestion picks keep their behavior.
+    /// </summary>
+    private void OnAddTagTextChanged(
+        Wpf.Ui.Controls.AutoSuggestBox sender, Wpf.Ui.Controls.AutoSuggestBoxTextChangedEventArgs args)
+    {
+        if (args.Reason != Wpf.Ui.Controls.AutoSuggestionBoxTextChangeReason.UserInput) return;
+        args.Handled = true;
+        var query = TagNormalizer.Normalize(args.Text);
+        sender.ItemsSource = _viewModel.AddTagSuggestions
+            .Where(name => KeyboardLayout.MatchesEitherLayout(TagNormalizer.Normalize(name), query))
+            .ToList();
     }
 
     private async void OnAddTagQuerySubmitted(

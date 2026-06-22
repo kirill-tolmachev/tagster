@@ -32,6 +32,7 @@ the WPF/Shell layers, which the xUnit suite does **not** cover:
 ```sh
 dotnet run --project src/Tagster.App -- --selftest          # instantiate Main+Settings windows (validates XAML), exit 0
 dotnet run --project src/Tagster.App -- --cover-test        # round-trip a folder cover
+dotnet run --project src/Tagster.App -- --fileop-test       # create/move/copy/rename/delete via shell IFileOperation
 dotnet run --project src/Tagster.App -- --integration-test  # register/unregister the Explorer context menu
 dotnet run --project src/Tagster.App -- --log-test          # prove exceptions reach the Serilog file
 dotnet run --project src/Tagster.App -- --make-icon [path]  # regenerate Tagster.ico
@@ -118,7 +119,7 @@ keep both call sites routed through it.
 |---|---|---|
 | `Tagster.Core` | `net10.0` | Pure C#, no Windows deps. Models, sidecar I/O, normalization, query engine, `TaggingService`/`TagManager`/`ArchiveScanner`, browsing, navigation. Owns `IFolderIndex` + shell-facing interfaces. |
 | `Tagster.Data` | `net10.0` | SQLite index (`Microsoft.Data.Sqlite` + Dapper). Implements `IFolderIndex`. |
-| `Tagster.Shell` | `net10.0-windows` | Win32/WPF interop: shell thumbnails, folder covers, Explorer registry integration. |
+| `Tagster.Shell` | `net10.0-windows` | Win32/WPF interop: shell thumbnails, folder covers, shell file operations (`IFileOperation`), Explorer registry integration. |
 | `Tagster.App` | `net10.0-windows` (WinExe) | WPF app + composition root. MVVM (CommunityToolkit.Mvvm), generic-host DI, WPF-UI (Fluent). |
 | `tests/Tagster.Tests` | `net10.0` | xUnit. References **only Core + Data** — so the tested logic is platform-agnostic; Shell/App are not unit-tested (use the self-tests above). |
 
@@ -147,6 +148,16 @@ the `Microsoft.Extensions.DependencyInjection` namespace: `AddTagsterCore()`,
 
 ### Windows-specific subtleties
 
+- **File operations** (`FileOperationService`, `IFileOperationService`): copy / cut / paste, rename,
+  delete, new-folder, and drag-drop all go through the Windows shell **`IFileOperation`** COM API
+  (`Interop/NativeFileOperation.cs`) — so they get Explorer's progress dialog, conflict prompts,
+  Recycle Bin, and undo, and interop with Explorer's own clipboard (`CF_HDROP` + the
+  `"Preferred DropEffect"` format, see `ClipboardFiles`). These call modal shell UI and must run on
+  the UI (STA) thread — do **not** wrap them in `Task.Run`. The owner HWND is supplied by the view via
+  `MainViewModel.OwnerWindowProvider`. **Index reconcile:** a structural change never touches the index
+  directly — `MainViewModel.AfterStructuralChangeAsync` just reruns **Rescan** when the op was under an
+  open archive (tags travel inside the moved/copied folder's sidecar; the scanner re-derives paths and
+  re-mints the GUID a copy/paste duplicated). Verify with `--fileop-test`.
 - **Folder covers** (`FolderCoverService`): writes a hidden portable `.tagster_cover.png` (source),
   a multi-resolution `Tagster.ico`, and a `desktop.ini`; **marks the folder `System`** (required for
   Windows to honor `desktop.ini`); then calls `SHChangeNotify` so Explorer refreshes. The scanner

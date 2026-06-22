@@ -9,6 +9,28 @@
 
     <ui:FluentWindow.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis" />
+
+        <!-- Right-click on a folder/file tile -->
+        <ContextMenu x:Key="ItemContextMenu">
+            <MenuItem Header="Open" Click="OnOpenItemClick" />
+            <MenuItem Header="Open in Explorer" Click="OnOpenInExplorerClick"
+                      Visibility="{Binding PlacementTarget.DataContext.IsFolder, RelativeSource={RelativeSource AncestorType=ContextMenu}, Converter={StaticResource BoolToVis}}" />
+            <MenuItem Header="Open parent folder" Click="OnOpenParentFolderClick"
+                      Visibility="{Binding PlacementTarget.DataContext.IsFile, RelativeSource={RelativeSource AncestorType=ContextMenu}, Converter={StaticResource BoolToVis}}" />
+            <Separator />
+            <MenuItem Header="Cut" Click="OnCutClick" InputGestureText="Ctrl+X" />
+            <MenuItem Header="Copy" Click="OnCopyClick" InputGestureText="Ctrl+C" />
+            <MenuItem Header="Paste" Click="OnPasteClick" InputGestureText="Ctrl+V" />
+            <Separator />
+            <MenuItem Header="Rename…" Click="OnRenameSelectedClick" InputGestureText="F2" />
+            <MenuItem Header="Delete" Click="OnDeleteSelectedClick" InputGestureText="Del" />
+        </ContextMenu>
+
+        <!-- Right-click on empty space in the grid -->
+        <ContextMenu x:Key="BackgroundContextMenu">
+            <MenuItem Header="New folder" Click="OnNewFolderClick" InputGestureText="Ctrl+Shift+N" />
+            <MenuItem Header="Paste" Click="OnPasteClick" InputGestureText="Ctrl+V" />
+        </ContextMenu>
     </ui:FluentWindow.Resources>
 
     <Grid>
@@ -191,6 +213,15 @@
                 <ListBox x:Name="FolderGrid"
                          ItemsSource="{Binding Items}"
                          SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
+                         SelectionMode="Extended"
+                         SelectionChanged="OnGridSelectionChanged"
+                         KeyDown="OnGridKeyDown"
+                         ContextMenu="{StaticResource BackgroundContextMenu}"
+                         AllowDrop="True"
+                         PreviewMouseLeftButtonDown="OnGridPreviewLeftButtonDown"
+                         PreviewMouseMove="OnGridPreviewMouseMove"
+                         DragOver="OnGridDragOver"
+                         Drop="OnGridDrop"
                          Background="Transparent" BorderThickness="0"
                          ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                          ScrollViewer.VerticalScrollBarVisibility="Visible"
@@ -217,7 +248,9 @@
                         <Style TargetType="ListBoxItem">
                             <Setter Property="Padding" Value="0" />
                             <Setter Property="Background" Value="Transparent" />
+                            <Setter Property="ContextMenu" Value="{StaticResource ItemContextMenu}" />
                             <EventSetter Event="MouseDoubleClick" Handler="OnItemDoubleClick" />
+                            <EventSetter Event="PreviewMouseRightButtonDown" Handler="OnItemRightButtonDown" />
                         </Style>
                     </ListBox.ItemContainerStyle>
                     <ListBox.ItemTemplate>
@@ -235,6 +268,9 @@
                                             <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
                                                 <Setter Property="BorderBrush" Value="{DynamicResource AccentFillColorDefaultBrush}" />
                                                 <Setter Property="BorderThickness" Value="2" />
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding IsCut}" Value="True">
+                                                <Setter Property="Opacity" Value="0.5" />
                                             </DataTrigger>
                                         </Style.Triggers>
                                     </Style>
@@ -330,6 +366,7 @@
                             <ui:AutoSuggestBox x:Name="AddTagBox" PlaceholderText="Add a tag…"
                                                Text="{Binding NewTagText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                                OriginalItemsSource="{Binding AddTagSuggestions}"
+                                               TextChanged="OnAddTagTextChanged"
                                                QuerySubmitted="OnAddTagQuerySubmitted" />
                         </DockPanel>
                         <ItemsControl ItemsSource="{Binding SelectedItem.Tags}" VerticalAlignment="Top">

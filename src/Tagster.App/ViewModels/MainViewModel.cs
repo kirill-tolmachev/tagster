@@ -24,11 +24,20 @@ public sealed partial class MainViewModel : ObservableObject
     private readonly ArchiveScanner _scanner;
     private readonly ITagManager _tagManager;
     private readonly IFolderCoverService _covers;
+    private readonly IFileOperationService _fileOps;
     private readonly ILogger<MainViewModel> _log;
     private readonly NavigationHistory _history = new();
     private readonly SynchronizationContext _uiContext;
 
     private CancellationTokenSource? _thumbnailCts;
+
+    /// <summary>
+    /// The current multi-selection in the grid. File operations (copy/cut/delete) act on this whole
+    /// set, while <see cref="SelectedItem"/> stays the single "primary" that drives the inspector and
+    /// tag editing. Maintained by the view through <see cref="UpdateSelection"/> because
+    /// <c>ListBox.SelectedItems</c> isn't bindable.
+    /// </summary>
+    private IReadOnlyList<FolderItemViewModel> _selection = [];
 
     /// <summary>
     /// Monotonic guard shared by the two view-producing async ops (<see cref="LoadCurrentAsync"/>
@@ -54,6 +63,7 @@ public sealed partial class MainViewModel : ObservableObject
         ArchiveScanner scanner,
         ITagManager tagManager,
         IFolderCoverService covers,
+        IFileOperationService fileOps,
         ILogger<MainViewModel> logger)
     {
         _browser = browser;
@@ -63,6 +73,7 @@ public sealed partial class MainViewModel : ObservableObject
         _scanner = scanner;
         _tagManager = tagManager;
         _covers = covers;
+        _fileOps = fileOps;
         _log = logger;
         _uiContext = SynchronizationContext.Current ?? new SynchronizationContext();
     }
@@ -97,6 +108,13 @@ public sealed partial class MainViewModel : ObservableObject
     public bool HasNoSelection => SelectedItem is null;
     public bool SelectedIsFolder => SelectedItem is { IsFolder: true };
     public bool SelectedIsFile => SelectedItem is { IsFile: true };
+
+    /// <summary>The whole grid selection; file operations act on this (see <see cref="_selection"/>).</summary>
+    public IReadOnlyList<FolderItemViewModel> Selection => _selection;
+    public int SelectionCount => _selection.Count;
+
+    /// <summary>Rename targets exactly one item (copy / cut / delete act on the whole selection).</summary>
+    public bool CanRenameSelection => _selection.Count == 1;
     public bool IsArchiveOpen => RootPath is not null;
     public bool HasActiveFilters => ActiveFilters.Count > 0;
     public bool ShowOpenArchivePrompt => RootPath is null && !IsLoading;
@@ -194,7 +212,8 @@ public sealed partial class MainViewModel : ObservableObject
         foreach (var tag in Tags)
         {
             var norm = TagNormalizer.Normalize(tag.Name);
-            if (query.Length > 0 && !norm.Contains(query, StringComparison.Ordinal))
+            // Layout-tolerant: a query typed in the wrong keyboard layout still finds its tag.
+            if (!KeyboardLayout.MatchesEitherLayout(norm, query))
                 continue;
             // Hide tags that don't co-occur with the current filter — but always keep active ones
             // visible so they can still be toggled off.
@@ -409,6 +428,221 @@ public sealed partial class MainViewModel : ObservableObject
             item.Thumbnail = image;
     }
 
+    // ---- file operations (rename / delete / new folder) ----
+
+    /// <summary>Supplied by the view: the owner window handle the shell dialogs are parented to.</summary>
+    public Func<nint>? OwnerWindowProvider { get; set; }
+
+    private nint OwnerWindow => OwnerWindowProvider?.Invoke() ?? 0;
+
+    private IReadOnlyList<string> SelectionPaths => [.. _selection.Select(i => i.FullPath)];
+
+    /// <summary>Rename a folder/file in place through the shell (undo-able, with conflict prompts).</summary>
+    public async Task RenameAsync(FolderItemViewModel item, string newName)
+    {
+        newName = newName.Trim();
+        if (newName.Length == 0 || string.Equals(newName, item.Name, StringComparison.Ordinal)) return;
+
+        string? newPath;
+        try
+        {
+            newPath = _fileOps.Rename(item.FullPath, newName, OwnerWindow);
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Rename failed for {Path}", item.FullPath);
+            StatusText = $"Couldn't rename: {ex.Message}";
+            return;
+        }
+        if (newPath is null) return; // cancelled
+
+        await AfterStructuralChangeAsync(mayAffectIndex: item.IsFolder);
+        SelectByPath(newPath);
+        StatusText = $"Renamed to {Path.GetFileName(newPath)}";
+    }
+
+    /// <summary>Send the whole current selection to the Recycle Bin.</summary>
+    public async Task DeleteSelectionAsync()
+    {
+        var paths = SelectionPaths;
+        if (paths.Count == 0) return;
+        var touchedFolder = _selection.Any(i => i.IsFolder);
+
+        bool completed;
+        try
+        {
+            completed = _fileOps.Delete(paths, OwnerWindow);
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Delete failed");
+            StatusText = $"Couldn't delete: {ex.Message}";
+            return;
+        }
+        if (!completed) return; // cancelled
+
+        await AfterStructuralChangeAsync(mayAffectIndex: touchedFolder);
+        StatusText = $"{paths.Count} item{(paths.Count == 1 ? "" : "s")} deleted";
+    }
+
+    /// <summary>Create a folder in the current directory, select it, and return it for inline renaming.</summary>
+    public async Task<FolderItemViewModel?> NewFolderAsync()
+    {
+        if (string.IsNullOrEmpty(CurrentPath) || !Directory.Exists(CurrentPath)) return null;
+
+        string created;
+        try
+        {
+            created = _fileOps.CreateFolder(CurrentPath);
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Create folder failed in {Path}", CurrentPath);
+            StatusText = $"Couldn't create folder: {ex.Message}";
+            return null;
+        }
+
+        // A brand-new empty folder has no sidecar, so it can't affect the index — just reload.
+        await AfterStructuralChangeAsync(mayAffectIndex: false);
+        SelectByPath(created);
+        StatusText = "Folder created";
+        return SelectedItem;
+    }
+
+    /// <summary>Tiles currently shown dimmed because they're on the clipboard as a cut.</summary>
+    private List<FolderItemViewModel> _cutItems = [];
+
+    /// <summary>Put the selection on the clipboard as a copy.</summary>
+    public void CopySelection()
+    {
+        var paths = SelectionPaths;
+        if (paths.Count == 0) return;
+        ClipboardFiles.Set(paths, cut: false);
+        MarkCut(null); // copying clears any prior cut dim
+        StatusText = $"{paths.Count} item{(paths.Count == 1 ? "" : "s")} copied";
+    }
+
+    /// <summary>Put the selection on the clipboard as a cut (the paste will move, not copy).</summary>
+    public void CutSelection()
+    {
+        if (_selection.Count == 0) return;
+        ClipboardFiles.Set(SelectionPaths, cut: true);
+        MarkCut(_selection);
+        StatusText = $"{_selection.Count} item{(_selection.Count == 1 ? "" : "s")} cut";
+    }
+
+    /// <summary>Dim the given tiles as cut (and un-dim whatever was previously cut).</summary>
+    private void MarkCut(IReadOnlyList<FolderItemViewModel>? items)
+    {
+        foreach (var item in _cutItems) item.IsCut = false;
+        _cutItems = items is null ? [] : [.. items];
+        foreach (var item in _cutItems) item.IsCut = true;
+    }
+
+    /// <summary>Paste the clipboard's files into the current folder, moving them if they were cut.</summary>
+    public async Task PasteAsync()
+    {
+        if (string.IsNullOrEmpty(CurrentPath) || !Directory.Exists(CurrentPath)) return;
+        if (!ClipboardFiles.TryGet(out var paths, out var isMove) || paths.Count == 0) return;
+
+        // Determined before the op: a move erases the source paths, so we can't probe them afterwards.
+        var touchedFolder = paths.Any(Directory.Exists);
+
+        bool completed;
+        try
+        {
+            completed = isMove
+                ? _fileOps.Move(paths, CurrentPath, OwnerWindow)
+                : _fileOps.Copy(paths, CurrentPath, OwnerWindow);
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Paste into {Path} failed", CurrentPath);
+            StatusText = $"Couldn't paste: {ex.Message}";
+            return;
+        }
+        if (!completed) return; // cancelled
+
+        if (isMove)
+        {
+            ClipboardFiles.Clear(); // a cut is consumed by its paste, like Explorer
+            MarkCut(null);
+        }
+
+        await AfterStructuralChangeAsync(mayAffectIndex: touchedFolder);
+        StatusText = $"{paths.Count} item{(paths.Count == 1 ? "" : "s")} pasted";
+    }
+
+    /// <summary>
+    /// Handle a drag-drop onto the grid: move (default) or copy (Ctrl) the dropped paths into
+    /// <paramref name="destinationFolder"/>. Invalid drops — a folder onto itself or a descendant, or a
+    /// no-op move into its own parent — are filtered out first.
+    /// </summary>
+    public async Task DropAsync(IReadOnlyList<string> paths, string destinationFolder, bool copy)
+    {
+        if (string.IsNullOrEmpty(destinationFolder) || !Directory.Exists(destinationFolder)) return;
+
+        var valid = paths.Where(p => !string.IsNullOrWhiteSpace(p) && IsValidDrop(p, destinationFolder, copy)).ToList();
+        if (valid.Count == 0) return;
+
+        var touchedFolder = valid.Any(Directory.Exists);
+        bool completed;
+        try
+        {
+            completed = copy
+                ? _fileOps.Copy(valid, destinationFolder, OwnerWindow)
+                : _fileOps.Move(valid, destinationFolder, OwnerWindow);
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Drop into {Path} failed", destinationFolder);
+            StatusText = $"Couldn't {(copy ? "copy" : "move")}: {ex.Message}";
+            return;
+        }
+        if (!completed) return; // cancelled
+
+        await AfterStructuralChangeAsync(mayAffectIndex: touchedFolder);
+        StatusText = $"{valid.Count} item{(valid.Count == 1 ? "" : "s")} {(copy ? "copied" : "moved")}";
+    }
+
+    private static bool IsValidDrop(string source, string destination, bool copy)
+    {
+        var src = Path.GetFullPath(source).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var dest = Path.GetFullPath(destination).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+        if (Directory.Exists(src))
+        {
+            // Never into itself or any descendant of itself (that would be a cycle).
+            if (string.Equals(src, dest, StringComparison.OrdinalIgnoreCase)) return false;
+            if (dest.StartsWith(src + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) return false;
+        }
+        // A move into the folder it already lives in is a no-op (a copy there is a legitimate duplicate).
+        if (!copy && string.Equals(Path.GetDirectoryName(src), dest, StringComparison.OrdinalIgnoreCase)) return false;
+
+        return true;
+    }
+
+    /// <summary>
+    /// Reconcile after a structural change: a folder op under an open archive needs a rescan (it may
+    /// have moved tagged subfolders or duplicated a GUID, which only the scanner resolves); anything
+    /// else just reloads the current view.
+    /// </summary>
+    private Task AfterStructuralChangeAsync(bool mayAffectIndex)
+        => mayAffectIndex && RootPath is not null
+            ? RescanAndRefreshTagsAsync()
+            : RefreshViewAsync();
+
+    private void SelectByPath(string fullPath)
+        => SelectedItem = Items.FirstOrDefault(
+            i => string.Equals(i.FullPath, fullPath, StringComparison.OrdinalIgnoreCase));
+
+    private static string? NearestExistingAncestor(string path)
+    {
+        for (var dir = Directory.GetParent(path); dir is not null; dir = dir.Parent)
+            if (dir.Exists) return dir.FullName;
+        return null;
+    }
+
     // ---- tag management (rename / delete) ----
 
     public async Task RenameTagAsync(TagFilterViewModel tag, string newName)
@@ -477,6 +711,14 @@ public sealed partial class MainViewModel : ObservableObject
     {
         var entry = _history.Current;
         if (entry is null) return;
+
+        // The current folder may have just been moved/deleted out from under us — re-home to the
+        // nearest surviving ancestor instead of loading a path that no longer exists.
+        if (!Directory.Exists(entry.Path) && NearestExistingAncestor(entry.Path) is { } fallback)
+        {
+            await NavigateToAsync(fallback);
+            return;
+        }
 
         var gen = ++_viewGeneration;
         IsLoading = true;
@@ -621,5 +863,20 @@ public sealed partial class MainViewModel : ObservableObject
         RemoveCoverCommand.NotifyCanExecuteChanged();
         NewTagText = "";
         RefreshAddTagSuggestions();
+    }
+
+    // ---- multi-selection (file operations act on the whole set) ----
+
+    /// <summary>
+    /// Called by the view whenever the grid selection changes — the canonical source of the
+    /// multi-selection, since <c>ListBox.SelectedItems</c> can't be data-bound. We snapshot it so the
+    /// set stays stable even as the live collection mutates.
+    /// </summary>
+    public void UpdateSelection(IEnumerable<FolderItemViewModel> items)
+    {
+        _selection = [.. items];
+        OnPropertyChanged(nameof(Selection));
+        OnPropertyChanged(nameof(SelectionCount));
+        OnPropertyChanged(nameof(CanRenameSelection));
     }
 }
