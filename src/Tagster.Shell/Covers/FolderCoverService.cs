@@ -1,6 +1,7 @@
 using System.IO;
 using System.Text;
 using System.Windows.Media.Imaging;
+using Tagster.Core;
 
 namespace Tagster.Shell;
 
@@ -61,34 +62,17 @@ public sealed class FolderCoverService : IFolderCoverService
             .AppendLine("ConfirmFileOp=0")
             .ToString();
 
-        ClearAttributes(path);
-        File.WriteAllText(path, content, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
-        SetHiddenSystem(path);
+        AtomicFile.Write(path, content, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+            FileAttributes.Hidden | FileAttributes.System);
     }
 
     private static void WriteHidden(string path, byte[] bytes)
-    {
-        ClearAttributes(path);
-        File.WriteAllBytes(path, bytes);
-        SetHiddenSystem(path);
-    }
+        => AtomicFile.Write(path, bytes, FileAttributes.Hidden | FileAttributes.System);
 
     private static void MarkSystem(string folderPath)
     {
         // A folder must be system (or read-only) for Windows to honour its desktop.ini.
         try { new DirectoryInfo(folderPath).Attributes |= FileAttributes.System; }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
-    }
-
-    private static void SetHiddenSystem(string path)
-    {
-        try { File.SetAttributes(path, FileAttributes.Hidden | FileAttributes.System); }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
-    }
-
-    private static void ClearAttributes(string path)
-    {
-        try { if (File.Exists(path)) File.SetAttributes(path, FileAttributes.Normal); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
     }
 

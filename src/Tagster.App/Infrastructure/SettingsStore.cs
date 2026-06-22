@@ -1,7 +1,9 @@
 using System.IO;
+using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Tagster.Core;
 
 namespace Tagster.App;
 
@@ -30,8 +32,9 @@ public sealed class SettingsStore(ILogger<SettingsStore>? logger = null)
     {
         try
         {
-            Directory.CreateDirectory(AppPaths.DataDirectory);
-            File.WriteAllText(FilePath, JsonSerializer.Serialize(settings, Options));
+            // Atomic + flushed write so a crash mid-save can't truncate settings.json and silently
+            // reset every preference on next launch (Load falls back to defaults on a parse error).
+            AtomicFile.Write(FilePath, JsonSerializer.Serialize(settings, Options), Encoding.UTF8);
         }
         catch (Exception ex)
         {

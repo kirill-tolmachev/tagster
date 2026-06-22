@@ -44,19 +44,12 @@ public sealed class SidecarStore(ILogger<SidecarStore>? logger = null) : ISideca
 
     public void Write(string folderPath, Sidecar sidecar)
     {
-        Directory.CreateDirectory(folderPath);
         var path = Path.Combine(folderPath, FileName);
-        var temp = Path.Combine(folderPath, $"{FileName}.{Guid.NewGuid():N}.tmp");
-
         var bytes = JsonSerializer.SerializeToUtf8Bytes(sidecar, JsonOptions);
-        File.WriteAllBytes(temp, bytes);
 
-        // Clear attributes on any existing (hidden) target so the replace cannot fail on Windows.
-        if (File.Exists(path))
-            File.SetAttributes(path, FileAttributes.Normal);
-        File.Move(temp, path, overwrite: true);
-
-        TrySetHidden(path);
+        // The sidecar is the source of truth: write it crash-safely (temp + flush + atomic replace)
+        // and keep it hidden. A replace that fails partway leaves the old sidecar intact and hidden.
+        AtomicFile.Write(path, bytes, FileAttributes.Hidden);
     }
 
     public void Delete(string folderPath)
@@ -65,18 +58,5 @@ public sealed class SidecarStore(ILogger<SidecarStore>? logger = null) : ISideca
         if (!File.Exists(path)) return;
         File.SetAttributes(path, FileAttributes.Normal);
         File.Delete(path);
-    }
-
-    private void TrySetHidden(string path)
-    {
-        try
-        {
-            File.SetAttributes(path, File.GetAttributes(path) | FileAttributes.Hidden);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            // The hidden attribute is cosmetic; log and carry on.
-            _log.LogDebug(ex, "Could not set hidden attribute on {Path}", path);
-        }
     }
 }
