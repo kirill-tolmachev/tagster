@@ -336,8 +336,15 @@ public sealed partial class MainViewModel : ObservableObject
 
     private async Task AfterTagEditAsync()
     {
+        var selectedPath = SelectedItem?.FullPath;
         await RefreshTagsAsync();
-        if (IsSearchMode) await ApplyFiltersAsync();
+        if (IsSearchMode)
+        {
+            await ApplyFiltersAsync();
+            if (selectedPath is not null)
+                SelectedItem = Items.FirstOrDefault(
+                    i => string.Equals(i.FullPath, selectedPath, StringComparison.OrdinalIgnoreCase));
+        }
     }
 
     private string ResolveRoot(string folderPath)
@@ -438,6 +445,7 @@ public sealed partial class MainViewModel : ObservableObject
             // can't freeze the window.
             await Task.Run(() => _scanner.RescanAsync(root));
             await RefreshTagsAsync();
+            await RefreshViewAsync();
             StatusText = $"{Tags.Count} tag{(Tags.Count == 1 ? "" : "s")} in archive";
         }
         finally
