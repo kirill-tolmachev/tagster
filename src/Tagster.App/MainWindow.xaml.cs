@@ -312,7 +312,15 @@ public partial class MainWindow
 
     private async void OnRemoveTagChip(object sender, RoutedEventArgs e)
     {
-        if (sender is FrameworkElement { DataContext: string tag })
+        if (sender is not FrameworkElement { DataContext: string tag }) return;
+
+        var folder = _viewModel.SelectedItem?.Name;
+        var message = folder is null
+            ? $"Remove the tag “{tag}”?"
+            : $"Remove the tag “{tag}” from “{folder}”?";
+        var confirm = MessageBox.Show(this, message, "Remove tag",
+            MessageBoxButton.OKCancel, MessageBoxImage.Question);
+        if (confirm == MessageBoxResult.OK)
             await _viewModel.RemoveTagAsync(tag);
     }
 

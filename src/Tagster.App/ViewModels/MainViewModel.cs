@@ -8,6 +8,9 @@ using Tagster.Shell;
 
 namespace Tagster.App;
 
+/// <summary>One option in the tag-panel sort picker: a <see cref="TagSortMode"/> and its label.</summary>
+public sealed record TagSortOption(TagSortMode Mode, string Label);
+
 /// <summary>
 /// Drives the main window: folder browsing, tag-based search, per-folder tag editing, and tag
 /// management — all over the same archive root.
@@ -25,6 +28,7 @@ public sealed partial class MainViewModel : ObservableObject
     private readonly ITagManager _tagManager;
     private readonly IFolderCoverService _covers;
     private readonly IFileOperationService _fileOps;
+    private readonly SettingsStore _settingsStore;
     private readonly ILogger<MainViewModel> _log;
     private readonly NavigationHistory _history = new();
     private readonly SynchronizationContext _uiContext;
@@ -64,6 +68,7 @@ public sealed partial class MainViewModel : ObservableObject
         ITagManager tagManager,
         IFolderCoverService covers,
         IFileOperationService fileOps,
+        SettingsStore settingsStore,
         ILogger<MainViewModel> logger)
     {
         _browser = browser;
@@ -74,8 +79,10 @@ public sealed partial class MainViewModel : ObservableObject
         _tagManager = tagManager;
         _covers = covers;
         _fileOps = fileOps;
+        _settingsStore = settingsStore;
         _log = logger;
         _uiContext = SynchronizationContext.Current ?? new SynchronizationContext();
+        _tagSort = _settingsStore.Load().TagSort;
     }
 
     public ObservableCollection<FolderItemViewModel> Items { get; } = [];
@@ -83,6 +90,13 @@ public sealed partial class MainViewModel : ObservableObject
     public ObservableCollection<TagFilterViewModel> Tags { get; } = [];
     public ObservableCollection<TagFilterViewModel> VisibleTags { get; } = [];
     public ObservableCollection<TagFilterViewModel> ActiveFilters { get; } = [];
+
+    /// <summary>The orderings offered by the tag-panel sort picker (bound by the view).</summary>
+    public IReadOnlyList<TagSortOption> TagSortOptions { get; } =
+    [
+        new(TagSortMode.Name, "Name"),
+        new(TagSortMode.Count, "Most used"),
+    ];
 
     /// <summary>
     /// Add-tag autocomplete pool: archive tags not already on the selected folder, best-first. The
@@ -97,6 +111,7 @@ public sealed partial class MainViewModel : ObservableObject
     [ObservableProperty] private bool _isSearchMode;
     [ObservableProperty] private string? _statusText;
     [ObservableProperty] private string _tagFilterText = "";
+    [ObservableProperty] private TagSortMode _tagSort;
     [ObservableProperty] private string _newTagText = "";
     [ObservableProperty] private FolderItemViewModel? _selectedItem;
 
@@ -205,10 +220,19 @@ public sealed partial class MainViewModel : ObservableObject
 
     partial void OnTagFilterTextChanged(string value) => RefreshVisibleTags();
 
+    /// <summary>Persist the chosen ordering and re-sort the panel.</summary>
+    partial void OnTagSortChanged(TagSortMode value)
+    {
+        var settings = _settingsStore.Load();
+        settings.TagSort = value;
+        _settingsStore.Save(settings);
+        RefreshVisibleTags();
+    }
+
     private void RefreshVisibleTags()
     {
         var query = TagNormalizer.Normalize(TagFilterText);
-        VisibleTags.Clear();
+        var matches = new List<TagFilterViewModel>();
         foreach (var tag in Tags)
         {
             var norm = TagNormalizer.Normalize(tag.Name);
@@ -219,8 +243,30 @@ public sealed partial class MainViewModel : ObservableObject
             // visible so they can still be toggled off.
             if (_availableTagNorms is not null && tag.State == TagFilterState.None && !_availableTagNorms.Contains(norm))
                 continue;
-            VisibleTags.Add(tag);
+            matches.Add(tag);
         }
+
+        SortForPanel(matches);
+
+        VisibleTags.Clear();
+        foreach (var tag in matches)
+            VisibleTags.Add(tag);
+    }
+
+    /// <summary>
+    /// Order the panel by the user's chosen mode: alphabetical (culture-aware, the same order as the
+    /// folder list) or most-used-first by archive-wide count, with the name as the tie-break.
+    /// </summary>
+    private void SortForPanel(List<TagFilterViewModel> tags)
+    {
+        if (TagSort == TagSortMode.Count)
+            tags.Sort(static (a, b) =>
+            {
+                var byUsage = b.GlobalCount.CompareTo(a.GlobalCount);
+                return byUsage != 0 ? byUsage : FolderNameComparer.Default.Compare(a.Name, b.Name);
+            });
+        else
+            tags.Sort(static (a, b) => FolderNameComparer.Default.Compare(a.Name, b.Name));
     }
 
     public async Task ToggleTagAsync(TagFilterViewModel tag, bool exclude)

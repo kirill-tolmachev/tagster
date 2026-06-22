@@ -15,7 +15,25 @@ public sealed partial class FolderItemViewModel : ObservableObject
     public bool IsFolder => !IsFile;
 
     [ObservableProperty] private ImageSource? _thumbnail;
-    [ObservableProperty] private IReadOnlyList<string> _tags;
+
+    private IReadOnlyList<string> _tags;
+
+    /// <summary>
+    /// The folder's tags, always kept in display order — alphabetical and culture-aware, the same
+    /// order as the folder list. Setting re-sorts before storing, so every surface shows them alike.
+    /// </summary>
+    public IReadOnlyList<string> Tags
+    {
+        get => _tags;
+        set
+        {
+            if (SetProperty(ref _tags, SortForDisplay(value)))
+            {
+                OnPropertyChanged(nameof(IsTagged));
+                OnPropertyChanged(nameof(TagsTooltip));
+            }
+        }
+    }
 
     /// <summary>True while this tile is on the clipboard as a cut — the grid dims it, like Explorer.</summary>
     [ObservableProperty] private bool _isCut;
@@ -24,7 +42,7 @@ public sealed partial class FolderItemViewModel : ObservableObject
     {
         Name = name;
         FullPath = fullPath;
-        _tags = tags;
+        _tags = SortForDisplay(tags);
         IsFile = isFile;
     }
 
@@ -33,9 +51,11 @@ public sealed partial class FolderItemViewModel : ObservableObject
     public bool IsTagged => Tags.Count > 0;
     public string TagsTooltip => Tags.Count > 0 ? string.Join(", ", Tags) : Name;
 
-    partial void OnTagsChanged(IReadOnlyList<string> value)
+    private static IReadOnlyList<string> SortForDisplay(IReadOnlyList<string> tags)
     {
-        OnPropertyChanged(nameof(IsTagged));
-        OnPropertyChanged(nameof(TagsTooltip));
+        if (tags.Count <= 1) return tags;
+        var sorted = tags.ToArray();
+        Array.Sort(sorted, FolderNameComparer.Default);
+        return sorted;
     }
 }

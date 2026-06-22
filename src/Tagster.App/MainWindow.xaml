@@ -100,7 +100,15 @@
             <!-- LEFT: tag filter -->
             <ui:Card Grid.Column="0" Margin="0,0,8,0" Padding="0">
                 <DockPanel Margin="12">
-                    <TextBlock DockPanel.Dock="Top" Text="Tags" FontWeight="SemiBold" FontSize="15" Margin="2,0,0,8" />
+                    <DockPanel DockPanel.Dock="Top" Margin="2,0,0,8">
+                        <ComboBox DockPanel.Dock="Right" MinWidth="104" FontSize="12" VerticalAlignment="Center"
+                                  ToolTip="Sort tags"
+                                  ItemsSource="{Binding TagSortOptions}"
+                                  DisplayMemberPath="Label"
+                                  SelectedValuePath="Mode"
+                                  SelectedValue="{Binding TagSort, Mode=TwoWay}" />
+                        <TextBlock Text="Tags" FontWeight="SemiBold" FontSize="15" VerticalAlignment="Center" />
+                    </DockPanel>
                     <ui:TextBox DockPanel.Dock="Top" PlaceholderText="Filter tags…" Icon="{ui:SymbolIcon Search24}"
                                 ClearButtonEnabled="True" Margin="0,0,0,8"
                                 Text="{Binding TagFilterText, UpdateSourceTrigger=PropertyChanged}" />
@@ -364,6 +372,7 @@
                             <ui:Button DockPanel.Dock="Right" Icon="{ui:SymbolIcon Add24}" Appearance="Primary" Margin="6,0,0,0"
                                        ToolTip="Add tag" Click="OnAddTagClick" />
                             <ui:AutoSuggestBox x:Name="AddTagBox" PlaceholderText="Add a tag…"
+                                               ClearButtonEnabled="True"
                                                Text="{Binding NewTagText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                                OriginalItemsSource="{Binding AddTagSuggestions}"
                                                TextChanged="OnAddTagTextChanged"
