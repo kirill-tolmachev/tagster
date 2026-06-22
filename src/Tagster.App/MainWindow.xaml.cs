@@ -269,6 +269,31 @@ public partial class MainWindow
         window.ShowDialog();
     }
 
+    /// <summary>The sort glyph is a plain button, so open its dropdown on left-click (not just right).</summary>
+    private void OnTagSortClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { ContextMenu: { } menu } target)
+        {
+            menu.PlacementTarget = target;
+            menu.IsOpen = true;
+        }
+    }
+
+    /// <summary>Tick the row matching the active sort each time the dropdown opens.</summary>
+    private void OnTagSortMenuOpened(object sender, RoutedEventArgs e)
+    {
+        if (sender is not ContextMenu menu) return;
+        var current = _viewModel.TagSort.ToString();
+        foreach (var item in menu.Items.OfType<MenuItem>())
+            item.IsChecked = item.Tag as string == current;
+    }
+
+    private void OnTagSortItemClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is MenuItem { Tag: string tag } && Enum.TryParse<TagSortMode>(tag, out var mode))
+            _viewModel.TagSort = mode;
+    }
+
     private async void OnTagIncludeClick(object sender, RoutedEventArgs e)
     {
         if (sender is FrameworkElement { DataContext: TagFilterViewModel tag })

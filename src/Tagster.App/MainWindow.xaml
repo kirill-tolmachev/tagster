@@ -101,12 +101,15 @@
             <ui:Card Grid.Column="0" Margin="0,0,8,0" Padding="0">
                 <DockPanel Margin="12">
                     <DockPanel DockPanel.Dock="Top" Margin="2,0,0,8">
-                        <ComboBox DockPanel.Dock="Right" MinWidth="104" FontSize="12" VerticalAlignment="Center"
-                                  ToolTip="Sort tags"
-                                  ItemsSource="{Binding TagSortOptions}"
-                                  DisplayMemberPath="Label"
-                                  SelectedValuePath="Mode"
-                                  SelectedValue="{Binding TagSort, Mode=TwoWay}" />
+                        <ui:Button DockPanel.Dock="Right" Appearance="Transparent" Padding="6,2" VerticalAlignment="Center"
+                                   Icon="{ui:SymbolIcon ArrowSort24}" ToolTip="Sort tags" Click="OnTagSortClick">
+                            <ui:Button.ContextMenu>
+                                <ContextMenu Placement="Bottom" Opened="OnTagSortMenuOpened">
+                                    <MenuItem Header="Name" IsCheckable="True" Tag="Name" Click="OnTagSortItemClick" />
+                                    <MenuItem Header="Most used" IsCheckable="True" Tag="Count" Click="OnTagSortItemClick" />
+                                </ContextMenu>
+                            </ui:Button.ContextMenu>
+                        </ui:Button>
                         <TextBlock Text="Tags" FontWeight="SemiBold" FontSize="15" VerticalAlignment="Center" />
                     </DockPanel>
                     <ui:TextBox DockPanel.Dock="Top" PlaceholderText="Filter tags…" Icon="{ui:SymbolIcon Search24}"

@@ -8,9 +8,6 @@ using Tagster.Shell;
 
 namespace Tagster.App;
 
-/// <summary>One option in the tag-panel sort picker: a <see cref="TagSortMode"/> and its label.</summary>
-public sealed record TagSortOption(TagSortMode Mode, string Label);
-
 /// <summary>
 /// Drives the main window: folder browsing, tag-based search, per-folder tag editing, and tag
 /// management — all over the same archive root.
@@ -90,13 +87,6 @@ public sealed partial class MainViewModel : ObservableObject
     public ObservableCollection<TagFilterViewModel> Tags { get; } = [];
     public ObservableCollection<TagFilterViewModel> VisibleTags { get; } = [];
     public ObservableCollection<TagFilterViewModel> ActiveFilters { get; } = [];
-
-    /// <summary>The orderings offered by the tag-panel sort picker (bound by the view).</summary>
-    public IReadOnlyList<TagSortOption> TagSortOptions { get; } =
-    [
-        new(TagSortMode.Name, "Name"),
-        new(TagSortMode.Count, "Most used"),
-    ];
 
     /// <summary>
     /// Add-tag autocomplete pool: archive tags not already on the selected folder, best-first. The
