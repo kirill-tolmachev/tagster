@@ -379,6 +379,7 @@
                                                Text="{Binding NewTagText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                                OriginalItemsSource="{Binding AddTagSuggestions}"
                                                TextChanged="OnAddTagTextChanged"
+                                               SuggestionChosen="OnAddTagSuggestionChosen"
                                                QuerySubmitted="OnAddTagQuerySubmitted" />
                         </DockPanel>
                         <ItemsControl ItemsSource="{Binding SelectedItem.Tags}" VerticalAlignment="Top">

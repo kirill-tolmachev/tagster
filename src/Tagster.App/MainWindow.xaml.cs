@@ -375,6 +375,24 @@ public partial class MainWindow
         => await SubmitAddTagAsync(AddTagBox.Text);
 
     /// <summary>
+    /// Picking a suggestion — clicking it, or arrowing to it and pressing Enter — adds that tag at
+    /// once. Every suggestion is by construction an existing tag, so this always takes the silent
+    /// reuse path (never the new-tag confirm). The catch: the control raises SuggestionChosen on
+    /// every arrow-key highlight too, so we commit only when no list-navigation key is held — that
+    /// is what separates a real pick (mouse-up / Enter) from a mere preview as you arrow past items.
+    /// </summary>
+    private async void OnAddTagSuggestionChosen(
+        Wpf.Ui.Controls.AutoSuggestBox sender, Wpf.Ui.Controls.AutoSuggestBoxSuggestionChosenEventArgs args)
+    {
+        if (IsListNavigationKeyDown()) return;
+        if (args.SelectedItem is not string tag || tag.Trim().Length == 0) return;
+
+        args.Handled = true; // skip the control's text-copy into the box; the add clears it anyway
+        await SubmitAddTagAsync(tag);
+        FocusAddTagInput(); // keep focus on the input so the next tag can be typed/picked right away
+    }
+
+    /// <summary>
     /// Commit the add-tag box: reuse an existing tag silently, but require an explicit confirm to
     /// create a brand-new one — so a typo can't quietly become a near-duplicate tag.
     /// </summary>
@@ -391,6 +409,29 @@ public partial class MainWindow
         if (choice == MessageBoxResult.OK)
             await _viewModel.CreateTagAsync(value);
     }
+
+    /// <summary>
+    /// True while a key that merely moves the suggestion highlight is held — used to tell an
+    /// arrow-driven preview of a suggestion apart from an explicit pick (a click or Enter). The
+    /// suggestion list lives in a popup, so its key events don't route through this window; the
+    /// live keyboard state at the moment SuggestionChosen fires is the reliable discriminator.
+    /// </summary>
+    private static bool IsListNavigationKeyDown() =>
+        Keyboard.IsKeyDown(Key.Up) || Keyboard.IsKeyDown(Key.Down)
+        || Keyboard.IsKeyDown(Key.PageUp) || Keyboard.IsKeyDown(Key.PageDown)
+        || Keyboard.IsKeyDown(Key.Home) || Keyboard.IsKeyDown(Key.End);
+
+    /// <summary>
+    /// Return focus to the add-tag text box (the control's inner <c>PART_TextBox</c>) after a pick,
+    /// out-prioritizing the focus the suggestion popup grabs as it closes.
+    /// </summary>
+    private void FocusAddTagInput() => Dispatcher.BeginInvoke(new Action(() =>
+    {
+        if (AddTagBox.Template?.FindName("PART_TextBox", AddTagBox) is TextBox textBox)
+            textBox.Focus();
+        else
+            AddTagBox.Focus();
+    }), DispatcherPriority.Background);
 
     private async void OnSetCoverClick(object sender, RoutedEventArgs e)
     {
